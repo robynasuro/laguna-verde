@@ -29,7 +29,7 @@ Serve the `game/` folder with any static server and open `index.html` in desktop
 
 ## How it is built
 
-Plain ES modules, no build step. Three.js r160 vendored. The source is split by job, one file per system: `city.js` builds the city, `cars.js` the driving, `traffic.js` and `pedestrians.js` the street life, `police.js` the wanted level, `missions.js` the story, `combat.js` the shooting, `hud.js` the HUD and minimap, `audio.js` the sound, `save.js` the save, `render.js` the scene and camera, `input.js` the keys, `shots.js` the screenshot scenes, `main.js` the loop that ties it together.
+Plain ES modules, no build step. Three.js r160 vendored as a minified module build. The source is split by job, one file per system: `city.js` builds the city, `cars.js` the driving, `traffic.js` and `pedestrians.js` the street life, `police.js` the wanted level, `missions.js` the story, `combat.js` the shooting, `hud.js` the HUD and minimap, `audio.js` the sound, `save.js` the save, `render.js` the scene and camera, `input.js` the keys, `shots.js` the screenshot scenes, `main.js` the loop that ties it together.
 
 Everything here is original: the city, the characters, the names, the story, the art, and the sound. No Rockstar material, no GTA names, no copied maps.
 

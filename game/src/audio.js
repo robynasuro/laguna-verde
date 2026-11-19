@@ -1,36 +1,77 @@
-// Procedural sound: engine hum, radio stations, sirens, gunshots. No audio files.
-// All sound is synthesized with WebAudio, so the game stays offline and self contained.
+// Procedural sound for Laguna Verde: engine hum, three radio stations,
+// sirens, gunshots, cash. No audio files anywhere, everything is synthesized
+// with WebAudio so the game stays offline and self contained.
 const STATIONS = [
   { name: 'LAGUNA FM 101.2', desc: 'Sunset pop', root: 220, scale: [0, 3, 5, 7, 10] },
   { name: 'TIBURON ROCK 94.7', desc: 'Garage rock', root: 110, scale: [0, 2, 3, 5, 7, 10] },
   { name: 'MAREA LATINA 88.5', desc: 'Cumbia nights', root: 196, scale: [0, 2, 4, 5, 7, 9, 11] },
 ];
+
 export function createAudio() {
-  const A = { ctx: null, station: 0, muted: false, radioOn: true, engineOsc: null, engineGain: null, radioTimer: null, sirenOsc: null };
+  const A = {
+    ctx: null,
+    station: 0,
+    muted: false,
+    radioOn: true,
+    engineOsc: null,
+    engineGain: null,
+    radioTimer: null,
+    sirenOsc: null,
+    sirenGain: null,
+  };
+
+  // AudioContext only exists after the player clicks something, so this runs
+  // from the start button. Calling it twice is harmless.
   A.ensure = () => {
-    if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
+    if (A.ctx) {
+      if (A.ctx.state === 'suspended') A.ctx.resume();
+      return;
+    }
     try {
       A.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      A.engineOsc = A.ctx.createOscillator(); A.engineOsc.type = 'sawtooth'; A.engineOsc.frequency.value = 50;
-      A.engineGain = A.ctx.createGain(); A.engineGain.gain.value = 0;
-      const filt = A.ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 400;
-      A.engineOsc.connect(filt); filt.connect(A.engineGain); A.engineGain.connect(A.ctx.destination);
+      A.engineOsc = A.ctx.createOscillator();
+      A.engineOsc.type = 'sawtooth';
+      A.engineOsc.frequency.value = 50;
+      A.engineGain = A.ctx.createGain();
+      A.engineGain.gain.value = 0;
+      const filt = A.ctx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = 400;
+      A.engineOsc.connect(filt);
+      filt.connect(A.engineGain);
+      A.engineGain.connect(A.ctx.destination);
       A.engineOsc.start();
       A.startRadio();
-    } catch { A.ctx = null; }
+    } catch {
+      A.ctx = null;
+    }
   };
+
+  // One short synth note, used by the radio melody and the cash jingle.
   A.note = (freq, t, dur, type, vol) => {
-    const o = A.ctx.createOscillator(); const g = A.ctx.createGain();
-    o.type = type; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    const o = A.ctx.createOscillator();
+    const g = A.ctx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g); g.connect(A.ctx.destination); o.start(t); o.stop(t + dur + 0.05);
+    o.connect(g);
+    g.connect(A.ctx.destination);
+    o.start(t);
+    o.stop(t + dur + 0.05);
   };
+
+  // The radio is a tiny sequencer: walk the station scale, bass every 4th note.
   A.startRadio = () => {
     if (!A.ctx) return;
     let step = 0;
     const tick = () => {
-      if (!A.ctx || A.muted || !A.radioOn) { A.radioTimer = setTimeout(tick, 200); return; }
+      if (!A.ctx) return;
+      if (A.muted || !A.radioOn) {
+        A.radioTimer = setTimeout(tick, 200);
+        return;
+      }
       const st = STATIONS[A.station];
       const t = A.ctx.currentTime + 0.05;
       const deg = st.scale[step % st.scale.length];
@@ -42,39 +83,74 @@ export function createAudio() {
     };
     tick();
   };
+
   A.setEngine = (speedNorm, driving) => {
     if (!A.ctx || !A.engineGain) return;
     A.engineGain.gain.value = A.muted ? 0 : (driving ? 0.02 + speedNorm * 0.05 : 0.012);
     A.engineOsc.frequency.value = 45 + speedNorm * 140;
   };
-  A.cycleStation = () => { A.station = (A.station + 1) % STATIONS.length; return STATIONS[A.station]; };
+
+  A.cycleStation = () => {
+    A.station = (A.station + 1) % STATIONS.length;
+    return STATIONS[A.station];
+  };
+
   A.stationName = () => STATIONS[A.station].name + ' - ' + STATIONS[A.station].desc;
+
+  // A gunshot is a burst of shaped noise.
   A.shot = () => {
     if (!A.ctx || A.muted) return;
     const t = A.ctx.currentTime;
-    const buf = A.ctx.createBuffer(1, A.ctx.sampleRate * 0.12, A.ctx.sampleRate);
+    const buf = A.ctx.createBuffer(1, Math.floor(A.ctx.sampleRate * 0.12), A.ctx.sampleRate);
     const d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-    const src = A.ctx.createBufferSource(); src.buffer = buf;
-    const g = A.ctx.createGain(); g.gain.value = 0.25;
-    src.connect(g); g.connect(A.ctx.destination); src.start(t);
+    const src = A.ctx.createBufferSource();
+    src.buffer = buf;
+    const g = A.ctx.createGain();
+    g.gain.value = 0.25;
+    src.connect(g);
+    g.connect(A.ctx.destination);
+    src.start(t);
   };
+
+  // Two-tone siren: an oscillator whose pitch wobbles on a slow LFO.
   A.siren = (on) => {
     if (!A.ctx) return;
     if (on && !A.sirenOsc) {
-      A.sirenOsc = A.ctx.createOscillator(); A.sirenOsc.type = 'sine';
-      const g = A.ctx.createGain(); g.gain.value = A.muted ? 0 : 0.03;
-      const lfo = A.ctx.createOscillator(); lfo.frequency.value = 0.5;
-      const lg = A.ctx.createGain(); lg.gain.value = 220;
-      lfo.connect(lg); lg.connect(A.sirenOsc.frequency); A.sirenOsc.frequency.value = 750;
-      A.sirenOsc.connect(g); g.connect(A.ctx.destination);
-      A.sirenOsc.start(); lfo.start(); A.sirenGain = g;
+      A.sirenOsc = A.ctx.createOscillator();
+      A.sirenOsc.type = 'sine';
+      const g = A.ctx.createGain();
+      g.gain.value = A.muted ? 0 : 0.03;
+      const lfo = A.ctx.createOscillator();
+      lfo.frequency.value = 0.5;
+      const lg = A.ctx.createGain();
+      lg.gain.value = 220;
+      lfo.connect(lg);
+      lg.connect(A.sirenOsc.frequency);
+      A.sirenOsc.frequency.value = 750;
+      A.sirenOsc.connect(g);
+      g.connect(A.ctx.destination);
+      A.sirenOsc.start();
+      lfo.start();
+      A.sirenGain = g;
     } else if (!on && A.sirenOsc) {
       try { A.sirenOsc.stop(); } catch {}
       A.sirenOsc = null;
     }
   };
-  A.cash = () => { if (!A.ctx || A.muted) return; const t = A.ctx.currentTime; A.note(880, t, 0.15, 'sine', 0.12); A.note(1320, t + 0.12, 0.25, 'sine', 0.12); };
-  A.toggleMute = () => { A.muted = !A.muted; if (A.engineGain) A.engineGain.gain.value = 0; return A.muted; };
+
+  A.cash = () => {
+    if (!A.ctx || A.muted) return;
+    const t = A.ctx.currentTime;
+    A.note(880, t, 0.15, 'sine', 0.12);
+    A.note(1320, t + 0.12, 0.25, 'sine', 0.12);
+  };
+
+  A.toggleMute = () => {
+    A.muted = !A.muted;
+    if (A.engineGain) A.engineGain.gain.value = 0;
+    return A.muted;
+  };
+
   return A;
 }
