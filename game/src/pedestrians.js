@@ -1,118 +1,77 @@
-// Pedestrians: people walking the sidewalks. They stroll, wait at corners,
-// and run when a car comes at them too fast. Hitting one is a crime.
+// Pedestrians. One job: people walking the sidewalks between waypoints so
+// the streets are not empty. They stroll, pause at corners, and never walk
+// on the lagoon (except the causeway).
 
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
+import { mulberry32, rand, pick } from './random.js';
 
-const SHIRT_COLORS = [0xe07a5f, 0x81b29a, 0xf2c14e, 0x4d96ff, 0xff9f45, 0x9b5de5, 0xe8e8e8, 0x6bcb77];
+const SHIRT_COLORS = [0xd96a4f, 0x5b8fb9, 0x7fb069, 0xe8b04b, 0xc98bb9, 0xf2e3c9, 0x8a6fb8, 0x3a3a40];
 
-function makePersonMesh(color) {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 1.1, 0.4),
-    new THREE.MeshLambertMaterial({ color }),
-  );
-  body.position.y = 1.05;
-  g.add(body);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 8, 6),
-    new THREE.MeshLambertMaterial({ color: 0xe8b98a }),
-  );
-  head.position.y = 1.85;
-  g.add(head);
-  const legL = new THREE.Mesh(
-    new THREE.BoxGeometry(0.26, 0.8, 0.26),
-    new THREE.MeshLambertMaterial({ color: 0x2f3338 }),
-  );
-  legL.position.set(-0.16, 0.4, 0);
-  g.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.16;
-  g.add(legR);
-  return g;
-}
+export class Pedestrians {
+  constructor(scene) {
+    this.scene = scene;
+    this.rng = mulberry32(33);
+    this.walkers = [];
+    for (let i = 0; i < 16; i++) this.spawn();
+  }
 
-export function createPedestrians(world, scene, rng) {
-  const people = [];
-  for (let i = 0; i < CONFIG.pedestrians.count; i++) {
-    const node = world.nodes[Math.floor(rng.next() * world.nodes.length)];
-    const x = node.x + rng.range(-14, 14);
-    const z = node.z + rng.range(-14, 14);
-    if (z < -60) continue; // nobody strolls on the water
-    const mesh = makePersonMesh(rng.pick(SHIRT_COLORS));
-    mesh.position.set(x, 0, z);
-    scene.add(mesh);
-    people.push({
-      mesh,
-      x,
-      z,
-      angle: rng.range(0, Math.PI * 2),
-      speed: rng.range(0.8, 1.6),
-      wait: rng.range(0, 4),
-      down: false,
-      downTimer: 0,
-      walkPhase: rng.range(0, Math.PI * 2),
+  spawn() {
+    const rng = this.rng;
+    const shirt = pick(rng, SHIRT_COLORS);
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 1.1, 8), new THREE.MeshLambertMaterial({ color: shirt }));
+    body.position.y = 1.15;
+    body.castShadow = true;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), new THREE.MeshLambertMaterial({ color: 0xd9a986 }));
+    head.position.y = 1.95;
+    head.castShadow = true;
+    g.add(head);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), new THREE.MeshLambertMaterial({ color: 0x2a2a30 }));
+    legs.position.y = 0.35;
+    g.add(legs);
+    const x = pick(rng, CONFIG.roadsX) + 7;
+    const z = rand(rng, -140, 140);
+    g.position.set(x, 0, z);
+    this.scene.add(g);
+    this.walkers.push({
+      group: g, x, z, yaw: rng() * Math.PI * 2,
+      speed: rand(rng, 1, 2.2), target: null, pause: rand(rng, 0, 3),
     });
   }
-  return people;
-}
 
-export function updatePedestrians(people, world, dt, playerCar, playerPos, onHit) {
-  for (const p of people) {
-    if (p.down) {
-      p.downTimer -= dt;
-      if (p.downTimer <= 0) {
-        p.down = false;
-        p.mesh.rotation.z = 0;
-        p.mesh.position.y = 0;
+  update(dt) {
+    for (const w of this.walkers) {
+      if (w.pause > 0) {
+        w.pause -= dt;
+        continue;
       }
-      continue;
+      if (!w.target) {
+        const vertical = this.rng() < 0.5;
+        if (vertical) {
+          w.target = { x: pick(this.rng, CONFIG.roadsX) + 7, z: rand(this.rng, -140, 140) };
+        } else {
+          w.target = { x: rand(this.rng, -110, 150), z: pick(this.rng, CONFIG.roadsZ) + 7 };
+        }
+        // Never send a walker into the lagoon; the causeway is the only crossing.
+        if (w.target.x < -115 && Math.abs(w.target.z) > 8) w.target.x = -112;
+      }
+      const dx = w.target.x - w.x;
+      const dz = w.target.z - w.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.5) {
+        w.target = null;
+        w.pause = rand(this.rng, 1, 4);
+        continue;
+      }
+      w.yaw = Math.atan2(dx, dz);
+      w.x += (dx / dist) * w.speed * dt;
+      w.z += (dz / dist) * w.speed * dt;
+      if (w.x < -115 && Math.abs(w.z) > 8) w.x = -112;
+      w.group.position.set(w.x, 0, w.z);
+      w.group.rotation.y = w.yaw;
+      w.group.position.y = Math.abs(Math.sin(performance.now() / 300 + w.x)) * 0.06;
     }
-    // Flee from a fast car heading our way.
-    let fleeX = 0;
-    let fleeZ = 0;
-    if (playerCar && !playerCar.wrecked && Math.abs(playerCar.speed) > 8) {
-      const dx = p.x - playerCar.x;
-      const dz = p.z - playerCar.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 9) {
-        fleeX = dx / (d || 1);
-        fleeZ = dz / (d || 1);
-      }
-    }
-    if (p.wait > 0) {
-      p.wait -= dt;
-    } else {
-      if (fleeX !== 0 || fleeZ !== 0) {
-        p.angle = Math.atan2(fleeX, fleeZ);
-        p.speed = 3.2;
-      } else {
-        p.speed = 1.2;
-        if (Math.random() < dt * 0.15) p.angle += (Math.random() - 0.5) * 1.6;
-      }
-      const nx = p.x + Math.sin(p.angle) * p.speed * dt;
-      const nz = p.z + Math.cos(p.angle) * p.speed * dt;
-      if (nx > -215 && nx < 235 && nz > -275 && nz < 195 && nz > -58) {
-        p.x = nx;
-        p.z = nz;
-      } else {
-        p.angle += Math.PI / 2;
-      }
-      if (Math.random() < dt * 0.05) p.wait = Math.random() * 3;
-    }
-    // Hit by the player's car: down they go, and the law notices.
-    if (playerCar && !playerCar.wrecked) {
-      const d = Math.hypot(playerCar.x - p.x, playerCar.z - p.z);
-      if (d < 2.1 && Math.abs(playerCar.speed) > 2) {
-        p.down = true;
-        p.downTimer = 6;
-        p.mesh.rotation.z = Math.PI / 2;
-        p.mesh.position.y = 0.3;
-        if (onHit) onHit(p);
-      }
-    }
-    p.walkPhase += dt * p.speed * 4;
-    p.mesh.position.set(p.x, p.down ? 0.3 : Math.abs(Math.sin(p.walkPhase)) * 0.06, p.z);
-    p.mesh.rotation.y = p.angle;
   }
 }

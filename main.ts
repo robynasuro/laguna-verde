@@ -1,9 +1,9 @@
-// Laguna Verde: Carmen's Debt — the hand-in program (Node 22, stdlib only).
-// It copies game/ and screenshots/ from beside this file to /output and
-// writes /output/dossier.json with the vendored make.fun library, the same
-// way the kit starter does. Outside the grader, MAKEFUN_OUTPUT_DIR stands
-// in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// Laguna Verde: Carmen's Debt — hand-in program (Node 22+, stdlib only).
+// It gathers the entry into the output directory the scorer reads: the
+// game folder and the screenshots, plus a dossier.json built by the vendored
+// make.fun library from exactly those files. Run it with:
+//   MAKEFUN_OUTPUT_DIR=out node main.ts
+// Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,12 +16,14 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes
-// the bytes; the others refuse an entry the scorer would refuse (more than
-// 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB
-// of game files, in all, or a path under game/ over 1000 bytes).
+// The scorer's own caps: at most 4 screenshots, each at most 256 KiB; the
+// game at most 993 files and 48 MiB in all, its text at most 160 KiB, and no
+// path under game/ longer than 1000 bytes. buildDossier refuses anything
+// over those limits, so a dossier here means the entry is in bounds.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

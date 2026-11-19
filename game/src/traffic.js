@@ -1,82 +1,111 @@
-// Traffic: AI cars that follow the road graph, plus parked cars the player
-// can steal. Traffic slows for the car ahead and for the player.
+// Traffic AI. One job: keep a dozen cars circulating on the road grid so
+// the city feels alive, turning at intersections without ever teleporting.
+// A car drives along one axis; when it reaches a cross street it may turn,
+// which only ever changes the axis it moves on, never its position.
 
-import { makeCar, driveCar, randomBodyColor } from './cars.js';
+import { createCar } from './cars.js';
 import { CONFIG } from './config.js';
+import { mulberry32, rand, randInt, pick } from './random.js';
 
-export function createTraffic(world, scene, rng) {
-  const cars = [];
-  const used = new Set();
+const TRAFFIC_COLORS = [0x3a6ea5, 0xd9a441, 0x7a7a7a, 0x4f8f5f, 0x8a5a9a, 0xc9c9c9, 0x5b8fb9, 0xb85450];
 
-  for (let i = 0; i < CONFIG.traffic.count; i++) {
-    const node = world.nodes[Math.floor(rng.next() * world.nodes.length)];
-    const key = `${node.id}`;
-    if (used.has(key)) continue;
-    used.add(key);
-    const nextId = node.links[Math.floor(rng.next() * node.links.length)];
-    const next = world.nodes[nextId];
-    const angle = Math.atan2(next.x - node.x, next.z - node.z);
-    const car = makeCar(world, scene, node.x, node.z, angle, randomBodyColor(rng), { traffic: true });
-    car.speed = CONFIG.traffic.speed * rng.range(0.8, 1.15);
-    car.node = node.id;
-    car.nextNode = nextId;
-    cars.push(car);
+export class Traffic {
+  constructor(scene) {
+    this.scene = scene;
+    this.rng = mulberry32(21);
+    this.cars = [];
+    for (let i = 0; i < 12; i++) this.spawnCar(true);
   }
 
-  // Parked cars along downtown roads, doors unlocked, waiting to be borrowed.
-  const parked = [];
-  const parkSpots = [
-    [-100, -14], [-50, 26], [50, -14], [100, 66], [-50, 106], [0, 146],
-    [150, 26], [-100, 66], [50, 146],
-  ];
-  for (const [x, z] of parkSpots) {
-    const car = makeCar(world, scene, x, z, rng.range(0, Math.PI * 2), randomBodyColor(rng), { parked: true });
-    parked.push(car);
+  spawnCar(anywhere = false) {
+    const rng = this.rng;
+    const vertical = rng() < 0.5;
+    const road = vertical ? pick(rng, CONFIG.roadsX) : pick(rng, CONFIG.roadsZ);
+    const along = rand(rng, -140, 140);
+    const dir = rng() < 0.5 ? 1 : -1;
+    const lane = (rng() < 0.5 ? -2.5 : 2.5) * dir;
+    const car = createCar(
+      vertical ? road + lane : along,
+      vertical ? along : road + lane,
+      vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2),
+      pick(rng, TRAFFIC_COLORS),
+    );
+    car.traffic = {
+      axis: vertical ? 'z' : 'x',
+      dir,
+      speed: rand(rng, 7, 12),
+      lane,
+      turnAt: rand(rng, -140, 140),
+    };
+    this.scene.add(car.group);
+    this.cars.push(car);
+    return car;
   }
-  return { cars, parked };
-}
 
-function steerToward(car, tx, tz, dt) {
-  const want = Math.atan2(tx - car.x, tz - car.z);
-  let diff = want - car.angle;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  const steer = Math.max(-1, Math.min(1, diff * 2.2));
-  return steer;
-}
-
-export function updateTraffic(traffic, world, dt, playerCar, rng) {
-  for (const car of traffic.cars) {
-    if (car.wrecked) continue;
-    const target = world.nodes[car.nextNode];
-    if (!target) continue;
-    const dx = target.x - car.x;
-    const dz = target.z - car.z;
-    const dist = Math.hypot(dx, dz);
-
-    // Slow down if something is right in front of us.
-    let desired = CONFIG.traffic.speed;
-    if (playerCar && !playerCar.wrecked) {
-      const pd = Math.hypot(playerCar.x - car.x, playerCar.z - car.z);
-      if (pd < 10) desired = Math.min(desired, 4);
+  update(dt, playerPos) {
+    for (const car of this.cars) {
+      const t = car.traffic;
+      // Keep a little distance from the player's car so traffic does not pile up.
+      if (playerPos) {
+        const dx = car.x - playerPos.x;
+        const dz = car.z - playerPos.z;
+        if (dx * dx + dz * dz < 36) {
+          car.speed = Math.max(0, car.speed - 20 * dt);
+        }
+      }
+      if (t.axis === 'z') {
+        car.z += t.dir * t.speed * dt;
+        car.yaw = t.dir > 0 ? 0 : Math.PI;
+        const crossed = t.dir > 0 ? car.z >= t.turnAt : car.z <= t.turnAt;
+        if (crossed) this.maybeTurn(car);
+        if (car.z > 155 || car.z < -155) this.respawn(car);
+      } else {
+        car.x += t.dir * t.speed * dt;
+        car.yaw = t.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+        const crossed = t.dir > 0 ? car.x >= t.turnAt : car.x <= t.turnAt;
+        if (crossed) this.maybeTurn(car);
+        if (car.x > 165 || car.x < -115) this.respawn(car);
+      }
+      // No traffic on the water except the causeway: push stray cars back.
+      if (car.x < -118 && Math.abs(car.z) > 8) {
+        car.x = -115;
+        t.axis = 'z';
+        t.dir = car.z >= 0 ? -1 : 1;
+        t.turnAt = car.z + t.dir * 40;
+      }
+      car.group.position.set(car.x, 0, car.z);
+      car.group.rotation.y = car.yaw;
     }
-    for (const other of traffic.cars) {
-      if (other === car || other.wrecked) continue;
-      const od = Math.hypot(other.x - car.x, other.z - car.z);
-      if (od < 8) desired = Math.min(desired, 3);
-    }
+  }
 
-    const steer = steerToward(car, target.x, target.z, dt);
-    const throttle = car.speed < desired ? 0.6 : 0;
-    driveCar(car, world, dt, throttle, steer, false);
-    car.speed = Math.max(0, Math.min(car.speed, desired + 2));
-
-    if (dist < 4) {
-      const node = world.nodes[car.nextNode];
-      car.node = node.id;
-      const choices = node.links.filter((id) => id !== car.node || node.links.length === 1);
-      const pickFrom = choices.length ? choices : node.links;
-      car.nextNode = pickFrom[Math.floor(rng.next() * pickFrom.length)];
+  maybeTurn(car) {
+    const rng = this.rng;
+    const t = car.traffic;
+    if (rng() < 0.45) {
+      // Turn: switch axis, keep the position exactly where it is. The new
+      // turn point is the next cross street along the new axis.
+      if (t.axis === 'z') {
+        t.axis = 'x';
+        const roads = CONFIG.roadsZ.filter((z) => Math.abs(z - car.z) < 6);
+        if (roads.length) car.z = roads[0];
+        t.dir = rng() < 0.5 ? 1 : -1;
+        t.turnAt = car.x + t.dir * rand(rng, 30, 90);
+      } else {
+        t.axis = 'z';
+        const roads = CONFIG.roadsX.filter((x) => Math.abs(x - car.x) < 6);
+        if (roads.length) car.x = roads[0];
+        t.dir = rng() < 0.5 ? 1 : -1;
+        t.turnAt = car.z + t.dir * rand(rng, 30, 90);
+      }
+    } else {
+      t.turnAt = (t.axis === 'z' ? car.z : car.x) + t.dir * rand(rng, 30, 90);
     }
+  }
+
+  respawn(car) {
+    const idx = this.cars.indexOf(car);
+    this.scene.remove(car.group);
+    if (idx >= 0) this.cars.splice(idx, 1);
+    this.spawnCar();
   }
 }

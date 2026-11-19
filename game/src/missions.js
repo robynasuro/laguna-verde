@@ -1,199 +1,202 @@
-// Story missions: the stage machine, the beacon marker, dialogue, payouts
-// and the debt. Missions run in order; finishing one pays money and chips
-// away at Tomas's $50,000 debt. The last one clears it.
+// Story missions. One job: the seven-job arc that pays off Tomas's debt,
+// each with a named client, a line of dialogue, a marker on the map, and a
+// payout. The game loop calls update() every frame; reaching the marker
+// advances the job, finishing it pays out and saves.
 
-import * as THREE from 'three';
-import { MISSIONS } from './config.js';
-import { setWanted, addWanted } from './police.js';
+export const MISSIONS = [
+  {
+    name: 'First Fare', client: 'Mrs. Alvarez', pay: 800, type: 'delivery',
+    line: 'Mrs. Alvarez: "Garage del Sol? My nephew said you drive like your father did. Take me to the market, dear."',
+    pickup: { x: -100, z: 137, label: 'Pick up Mrs. Alvarez' },
+    dropoff: { x: 50, z: 20, label: 'Drop her at the market' },
+  },
+  {
+    name: 'The Pickup', client: 'Dante', pay: 1200, type: 'delivery',
+    line: 'Dante: "Package is waiting by the docks. No questions, no stops. You know how this works."',
+    pickup: { x: 100, z: -50, label: 'Collect the package' },
+    dropoff: { x: -50, z: -100, label: 'Deliver to the docks' },
+    onPickupWanted: 1,
+  },
+  {
+    name: 'Race the Tide', client: 'Tomas', pay: 1500, type: 'race',
+    line: 'Tomas: "Come on, sis. One race along the boardwalk and the Sharks back off for a week. You in?"',
+    checkpoints: [
+      { x: -120, z: 100, label: 'Race checkpoint 1 of 3' },
+      { x: -120, z: -100, label: 'Race checkpoint 2 of 3' },
+      { x: 0, z: -150, label: 'Finish line' },
+    ],
+  },
+  {
+    name: 'The Getaway', client: 'Dante', pay: 2000, type: 'getaway',
+    line: 'Dante: "Job went loud downtown. Get me to the safehouse and do not stop for red lights or sirens."',
+    pickup: { x: -50, z: 50, label: 'Pick up Dante' },
+    safehouse: { x: 150, z: 150, label: 'Reach the safehouse' },
+    onPickupWanted: 3,
+  },
+  {
+    name: "Smuggler's Run", client: 'Rosa', pay: 2500, type: 'delivery',
+    line: 'Rosa: "Cross the causeway at dusk, headlights off where you can. The goods are worth the risk."',
+    pickup: { x: -200, z: 0, label: 'Load the goods on the causeway' },
+    dropoff: { x: 120, z: 120, label: 'Deliver to the villa' },
+    timeOfDay: 'dusk',
+  },
+  {
+    name: 'The Garage Job', client: 'Carmen', pay: 3000, type: 'defend',
+    line: 'Carmen: "They came for the garage. My father built this place. Nobody takes it tonight."',
+    defendAt: { x: 20, z: 100, label: 'Defend Garage del Sol' },
+    enemies: 5,
+  },
+  {
+    name: 'Clear the Debt', client: 'Tomas', pay: 5000, type: 'delivery',
+    line: 'Tomas: "Last run, sis. After this, the Sharks never come near our family again. I promise."',
+    pickup: { x: 0, z: -150, label: 'Pick up Tomas' },
+    dropoff: { x: -100, z: 137, label: 'Make the final drop' },
+    onPickupWanted: 2,
+  },
+];
 
-export function createMissions(scene) {
-  // The beacon: a glowing column + a floating ring over the objective.
-  const beacon = new THREE.Group();
-  const column = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.6, 1.6, 30, 12, 1, true),
-    new THREE.MeshBasicMaterial({
-      color: 0xffd93d, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
-    }),
-  );
-  column.position.y = 15;
-  beacon.add(column);
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(1.6, 2.4, 20),
-    new THREE.MeshBasicMaterial({ color: 0xffd93d, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.3;
-  beacon.add(ring);
-  beacon.visible = false;
-  scene.add(beacon);
-  return {
-    list: MISSIONS,
-    index: 0,
-    stage: 0,
-    active: false,
-    done: false,
-    completed: [],
-    beacon,
-    kills: 0,
-    raceStart: 0,
-    raceTime: 0,
-    onComplete: null,
-    onFail: null,
-  };
-}
-
-export function currentMission(m) {
-  return m.list[m.index] || null;
-}
-
-export function missionObjectiveText(m) {
-  const cur = currentMission(m);
-  if (!cur) return 'Debt cleared. Laguna Verde is yours, Carmen.';
-  if (!m.active) return `Next job: ${cur.name} — ${cur.client}. Walk to the yellow marker or press N to start.`;
-  const stage = cur.stages[m.stage];
-  return stage ? stage.text : cur.name;
-}
-
-export function startMission(m, ctx) {
-  const cur = currentMission(m);
-  if (!cur || m.active) return false;
-  m.active = true;
-  m.stage = 0;
-  m.kills = 0;
-  m.raceStart = ctx.time;
-  if (cur.wanted) setWanted(ctx.police, cur.wanted);
-  if (cur.timeOfDay) ctx.setTimeOfDay(cur.timeOfDay);
-  ctx.hud.showDialogue(cur.client, cur.intro);
-  ctx.hud.showToast(`${cur.name} — ${cur.client}`);
-  ctx.audio.jingle();
-  placeBeacon(m, ctx);
-  return true;
-}
-
-function placeBeacon(m, ctx) {
-  const cur = currentMission(m);
-  if (!cur || !m.active) {
-    m.beacon.visible = false;
-    return;
+export class Missions {
+  constructor(marker, markerGem) {
+    this.list = MISSIONS;
+    this.index = 0;
+    this.active = false;
+    this.stage = 0;
+    this.completed = 0;
+    this.kills = 0;
+    this.timer = 0;
+    this.marker = marker;
+    this.markerGem = markerGem;
+    this.allDone = false;
   }
-  const stage = cur.stages[m.stage];
-  if (!stage || stage.type === 'defend') {
-    // Defend: the beacon stays on the garage.
-    m.beacon.position.set(20, 0, 120);
-    m.beacon.visible = true;
-    return;
+
+  current() {
+    return this.list[this.index];
   }
-  m.beacon.position.set(stage.target[0], 0, stage.target[1]);
-  m.beacon.visible = true;
-}
 
-function advanceStage(m, ctx) {
-  const cur = currentMission(m);
-  m.stage += 1;
-  if (m.stage >= cur.stages.length) {
-    completeMission(m, ctx);
-  } else {
-    const stage = cur.stages[m.stage];
-    ctx.hud.showToast(stage.text);
-    placeBeacon(m, ctx);
+  target() {
+    if (!this.active) return null;
+    const m = this.current();
+    if (!m) return null;
+    if (m.type === 'race') return m.checkpoints[Math.min(this.stage, m.checkpoints.length - 1)];
+    if (m.type === 'defend') return m.defendAt;
+    if (m.type === 'getaway') return this.stage === 0 ? m.pickup : m.safehouse;
+    return this.stage === 0 ? m.pickup : m.dropoff;
   }
-}
 
-function completeMission(m, ctx) {
-  const cur = currentMission(m);
-  m.active = false;
-  m.completed.push(cur.id);
-  ctx.player.money += cur.payout;
-  ctx.player.debtPaid = Math.min(50000, ctx.player.debtPaid + cur.payout);
-  m.beacon.visible = false;
-  ctx.hud.showToast(`Job done: ${cur.name} — paid $${cur.payout.toLocaleString()}`);
-  ctx.hud.showDialogue(cur.client, cur.id === 7
-    ? 'It is done. The debt is gone. Tomas is free, and so are we.'
-    : 'Paid. The debt is smaller now. One job at a time.');
-  ctx.audio.jingle();
-  ctx.saveGame();
-  if (cur.id === 7) {
-    m.done = true;
-    ctx.state = 'won';
-    ctx.hud.showWin();
-  } else {
-    m.index += 1;
-    ctx.hud.showMissionComplete(cur);
-  }
-  if (m.onComplete) m.onComplete(cur);
-}
-
-export function failMission(m, ctx, reason) {
-  if (!m.active) return;
-  m.active = false;
-  m.beacon.visible = false;
-  ctx.hud.showToast(`Job failed: ${reason}`);
-  ctx.hud.showMissionFailed(currentMission(m), reason);
-  ctx.player.health = 100;
-  if (m.onFail) m.onFail(reason);
-}
-
-export function updateMissions(m, ctx, dt) {
-  if (!m.active) return;
-  const cur = currentMission(m);
-  if (!cur) return;
-  const stage = cur.stages[m.stage];
-  if (!stage) return;
-  const p = ctx.player;
-  const px = p.car ? p.car.x : p.x;
-  const pz = p.car ? p.car.z : p.z;
-
-  if (stage.type === 'defend') {
-    // Defend counts kills, not position.
-    if (m.kills >= (cur.attackers || 5)) {
-      advanceStage(m, ctx);
+  objective() {
+    if (this.allDone) return 'Debt cleared. Laguna Verde is yours, Carmen.';
+    if (!this.active) {
+      const m = this.current();
+      return m ? `Next job: ${m.name} — press N to start` : 'No jobs left.';
     }
-    return;
+    const t = this.target();
+    if (!t) return '';
+    if (this.current().type === 'defend') return `${t.label} — ${this.kills} of ${this.current().enemies} down`;
+    if (this.current().type === 'getaway' && this.stage === 1) return `${t.label} — lose the heat (${Math.ceil(this.timer)}s)`;
+    return t.label;
   }
-  const dx = stage.target[0] - px;
-  const dz = stage.target[1] - pz;
-  const dist = Math.hypot(dx, dz);
-  m.targetDist = dist;
 
-  if (stage.type === 'pickup') {
-    if (dist < 6) {
-      ctx.hud.showPrompt('Press E to pick up');
-      if (ctx.input.consume('KeyE')) {
-        if (cur.ambush) {
-          ctx.combat.spawnAmbush(ctx, 3);
-          addWanted(ctx.police, 1, 'rival crew');
-          ctx.hud.showDialogue('Rico', 'Told you. Black jackets, two o\u2019clock. Drive!');
-        }
-        advanceStage(m, ctx);
-      }
-    }
-    return;
+  start(i, game) {
+    if (i >= this.list.length) return false;
+    this.index = i;
+    const m = this.current();
+    this.active = true;
+    this.stage = 0;
+    this.kills = 0;
+    this.timer = 0;
+    if (m.type === 'getaway') this.timer = 30;
+    if (m.timeOfDay) game.setTimeOfDay(m.timeOfDay);
+    if (m.type === 'defend') game.combat.spawnEnemies(m.defendAt.x, m.defendAt.z, m.enemies);
+    this.placeMarker();
+    // In shot mode the banner must survive the slow first render in the
+    // headless browser, so it stays up for the capture.
+    game.hud.showBanner(m.name, m.line, game.shotMode ? 30000 : 6000);
+    return true;
   }
-  if (stage.type === 'race') {
-    // Race checkpoints must be hit in order, and the clock is running.
-    m.raceTime = ctx.time - m.raceStart;
-    if (dist < 8) {
-      ctx.hud.showToast(`Checkpoint ${m.stage + 1} of ${cur.stages.length} — ${m.raceTime.toFixed(1)}s`);
-      advanceStage(m, ctx);
-    }
-    return;
-  }
-  // goto / deliver / escape: reaching the point finishes the stage.
-  const radius = stage.type === 'escape' ? 10 : 7;
-  if (dist < radius) {
-    if (stage.type === 'escape' && ctx.police.wanted >= 4) {
-      ctx.hud.showToast('Too hot. Lose some heat first.');
+
+  placeMarker() {
+    const t = this.target();
+    if (!t || !this.active) {
+      this.marker.visible = false;
       return;
     }
-    advanceStage(m, ctx);
+    this.marker.visible = true;
+    this.marker.position.set(t.x, 0, t.z);
   }
-}
 
-// Called by combat when the player defeats an attacker during a defense.
-export function registerKill(m, ctx) {
-  m.kills += 1;
-  const cur = currentMission(m);
-  if (cur && cur.stages[m.stage] && cur.stages[m.stage].type === 'defend') {
-    ctx.hud.showToast(`Attackers stopped: ${m.kills} of ${cur.attackers || 5}`);
+  // The player counts as "there" if they or their car is close to the marker.
+  reached(game) {
+    const t = this.target();
+    if (!t) return false;
+    const px = game.player.x;
+    const pz = game.player.z;
+    const dPlayer = Math.hypot(px - t.x, pz - t.z);
+    let dCar = Infinity;
+    if (game.player.car) dCar = Math.hypot(game.player.car.x - t.x, game.player.car.z - t.z);
+    return Math.min(dPlayer, dCar) < 22;
+  }
+
+  update(dt, game) {
+    if (!this.active) return;
+    const m = this.current();
+    if (this.markerGem) {
+      this.markerGem.rotation.y += dt * 2;
+      this.markerGem.position.y = 6 + Math.sin(performance.now() / 300) * 0.8;
+    }
+    if (m.type === 'defend') {
+      if (this.kills >= m.enemies) this.complete(game);
+      return;
+    }
+    if (m.type === 'getaway' && this.stage === 1) {
+      this.timer -= dt;
+      if (this.timer <= 0) {
+        this.complete(game);
+        return;
+      }
+    }
+    if (this.reached(game)) this.advance(game);
+  }
+
+  advance(game) {
+    const m = this.current();
+    if (m.type === 'race') {
+      this.stage += 1;
+      if (this.stage >= m.checkpoints.length) {
+        this.complete(game);
+        return;
+      }
+      this.placeMarker();
+      return;
+    }
+    if (this.stage === 0) {
+      this.stage = 1;
+      if (m.onPickupWanted) game.police.addWanted(m.onPickupWanted);
+      if (m.type === 'getaway') this.timer = 30;
+      this.placeMarker();
+      game.hud.flashObjective('Picked up. Now get going.');
+      return;
+    }
+    this.complete(game);
+  }
+
+  complete(game) {
+    const m = this.current();
+    game.player.money += m.pay;
+    game.player.debtPaid += m.pay;
+    this.completed += 1;
+    this.active = false;
+    this.marker.visible = false;
+    const last = this.index >= this.list.length - 1;
+    if (last) this.allDone = true;
+    this.index = Math.min(this.index + 1, this.list.length - 1);
+    game.hud.showMissionEnd(last ? 'Debt Cleared' : 'Job Complete', `${m.name} — earned $${m.pay}. Debt paid: $${game.player.debtPaid} of $50,000.`);
+    game.audio.chime();
+    game.saveGame();
+  }
+
+  fail(game, reason) {
+    this.active = false;
+    this.marker.visible = false;
+    game.hud.showMissionEnd('Job Failed', reason);
   }
 }

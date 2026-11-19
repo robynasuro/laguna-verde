@@ -1,74 +1,36 @@
-// Keyboard + mouse input. Tracks held keys and one-shot presses so the game
-// loop can ask "is W down" and "was E just pressed" without event soup.
+// Keyboard input. One job: track which keys are held and which were just
+// pressed this frame, so the game loop can react to taps (E, G, P, F) and
+// holds (WASD driving) without duplicating edge logic everywhere.
 
-export function createInput() {
-  const down = new Set();
-  const pressed = new Set();
-  let mouseDX = 0;
-  let mouseDY = 0;
-  let locked = false;
-
-  function onKeyDown(e) {
-    if (e.repeat) return;
-    down.add(e.code);
-    pressed.add(e.code);
-  }
-  function onKeyUp(e) {
-    down.delete(e.code);
-  }
-  function onMouseMove(e) {
-    if (!locked) return;
-    mouseDX += e.movementX || 0;
-    mouseDY += e.movementY || 0;
-  }
-  function onMouseDown() {
-    // Clicking the canvas grabs the pointer for mouse look.
-    const canvas = document.getElementById('game');
-    if (canvas && canvas.requestPointerLock) {
-      try {
-        canvas.requestPointerLock();
-      } catch (err) {
-        /* pointer lock is optional */
-      }
-    }
-  }
-  function onLockChange() {
-    locked = document.pointerLockElement != null;
+export class Input {
+  constructor() {
+    this.down = new Set();
+    this.justPressed = new Set();
+    this.onKeyDown = null;
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.down.add(e.code);
+      this.justPressed.add(e.code);
+      if (this.onKeyDown) this.onKeyDown(e.code);
+    });
+    window.addEventListener('keyup', (e) => {
+      this.down.delete(e.code);
+    });
+    window.addEventListener('blur', () => {
+      this.down.clear();
+      this.justPressed.clear();
+    });
   }
 
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mousedown', onMouseDown);
-  document.addEventListener('pointerlockchange', onLockChange);
+  isDown(code) {
+    return this.down.has(code);
+  }
 
-  return {
-    isDown(code) {
-      return down.has(code);
-    },
-    wasPressed(code) {
-      return pressed.has(code);
-    },
-    consume(code) {
-      const had = pressed.has(code);
-      pressed.delete(code);
-      return had;
-    },
-    takeMouse() {
-      const dx = mouseDX;
-      const dy = mouseDY;
-      mouseDX = 0;
-      mouseDY = 0;
-      return { dx, dy };
-    },
-    // Test / automation hook: pretend a key is held or pressed.
-    inject(code, kind) {
-      if (kind === 'down') down.add(code);
-      else if (kind === 'up') down.delete(code);
-      else if (kind === 'press') pressed.add(code);
-    },
-    endFrame() {
-      pressed.clear();
-    },
-  };
+  wasPressed(code) {
+    return this.justPressed.has(code);
+  }
+
+  endFrame() {
+    this.justPressed.clear();
+  }
 }

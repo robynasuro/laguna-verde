@@ -1,99 +1,91 @@
-// Three.js scene, lighting, sky and the chase camera. One place owns the
-// renderer so the rest of the game never touches WebGL directly.
+// Renderer, lights and camera. One job: own the Three.js scene, the
+// golden-hour / dusk / night lighting, and the chase, front, aerial and
+// cover cameras the game and the screenshots use.
 
-import * as THREE from 'three';
-import { CONFIG } from './config.js';
+import * as THREE from '../vendor/three.module.min.js';
 
-export function createRenderer(canvas) {
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    antialias: false,
-    powerPreference: 'high-performance',
-  });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
-  return renderer;
-}
+const SKIES = {
+  golden: { bg: 0xffd9a0, fog: 0xffd9a0, sun: 0xffc46a, sunI: 1.5, amb: 0.55, ambColor: 0xffe0b8 },
+  dusk: { bg: 0xe8906a, fog: 0xe8906a, sun: 0xff7a40, sunI: 1.1, amb: 0.48, ambColor: 0xffb090 },
+  night: { bg: 0x1a2340, fog: 0x1a2340, sun: 0x8aa0ff, sunI: 0.5, amb: 0.22, ambColor: 0x8090b8 },
+};
 
-export function createScene() {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(CONFIG.sky.golden);
-  scene.fog = new THREE.Fog(0xffd9a0, 130, 460);
-  return scene;
-}
-
-// Golden-hour sun + a soft sky fill. setTimeOfDay re-aims and re-colors them.
-export function createLights(scene) {
-  const sun = new THREE.DirectionalLight(0xffb36b, 2.4);
-  sun.position.set(-80, 60, -120);
-  scene.add(sun);
-  const hemi = new THREE.HemisphereLight(0xffe0b3, 0x4a6b5a, 0.9);
-  scene.add(hemi);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
-  scene.add(ambient);
-  return { sun, hemi, ambient };
-}
-
-export function setTimeOfDay(lights, scene, mode) {
-  const sky = CONFIG.sky;
-  if (mode === 'golden') {
-    scene.background.setHex(sky.golden);
-    scene.fog.color.setHex(0xffd9a0);
-    lights.sun.color.setHex(0xffb36b);
-    lights.sun.intensity = 2.4;
-    lights.sun.position.set(-80, 60, -120);
-    lights.hemi.intensity = 0.9;
-  } else if (mode === 'dusk') {
-    scene.background.setHex(sky.dusk);
-    scene.fog.color.setHex(0xe08a5a);
-    lights.sun.color.setHex(0xff7a3c);
-    lights.sun.intensity = 1.5;
-    lights.sun.position.set(-140, 22, -60);
-    lights.hemi.intensity = 0.55;
-  } else if (mode === 'night') {
-    scene.background.setHex(sky.night);
-    scene.fog.color.setHex(0x1b2340);
-    lights.sun.color.setHex(0x8fa8ff);
-    lights.sun.intensity = 0.5;
-    lights.sun.position.set(60, 90, 40);
-    lights.hemi.intensity = 0.3;
-  } else {
-    scene.background.setHex(sky.day);
-    scene.fog.color.setHex(0xbfd9e8);
-    lights.sun.color.setHex(0xfff2d8);
-    lights.sun.intensity = 2.2;
-    lights.sun.position.set(40, 120, 60);
-    lights.hemi.intensity = 1.0;
+export class Renderer {
+  constructor(canvas) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setSize(1280, 720, false);
+    this.renderer.setPixelRatio(1);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(SKIES.golden.bg);
+    this.scene.fog = new THREE.Fog(SKIES.golden.fog, 180, 520);
+    this.camera = new THREE.PerspectiveCamera(62, 1280 / 720, 0.1, 900);
+    this.camera.position.set(0, 10, 20);
+    this.sun = new THREE.DirectionalLight(SKIES.golden.sun, SKIES.golden.sunI);
+    this.sun.position.set(120, 140, 60);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.camera.left = -260;
+    this.sun.shadow.camera.right = 260;
+    this.sun.shadow.camera.top = 260;
+    this.sun.shadow.camera.bottom = -260;
+    this.sun.shadow.camera.far = 600;
+    this.scene.add(this.sun);
+    this.ambient = new THREE.AmbientLight(SKIES.golden.ambColor, SKIES.golden.amb);
+    this.scene.add(this.ambient);
+    this.mode = 'chase';
+    this.coverPos = new THREE.Vector3(35, 12, 145);
+    this.coverTarget = new THREE.Vector3(-40, 4, 70);
+    this.aerialPos = new THREE.Vector3(60, 190, 190);
+    this.aerialTarget = new THREE.Vector3(-20, 0, 0);
+    this.smoothPos = new THREE.Vector3(0, 10, 20);
+    this.smoothLook = new THREE.Vector3(0, 2, 0);
+    this.timeOfDay = 'golden';
   }
-}
 
-// Smooth chase camera: sits behind and above a moving target, lerps into
-// place so it never snaps. target = { x, z, angle, speed }.
-export function updateChaseCamera(camera, target, dt, distance, height) {
-  const backX = -Math.sin(target.angle) * distance;
-  const backZ = -Math.cos(target.angle) * distance;
-  const wantX = target.x + backX;
-  const wantZ = target.z + backZ;
-  const wantY = height + Math.min(target.speed * 0.04, 1.2);
-  const k = 1 - Math.exp(-dt * 5);
-  camera.position.x += (wantX - camera.position.x) * k;
-  camera.position.y += (wantY - camera.position.y) * k;
-  camera.position.z += (wantZ - camera.position.z) * k;
-  camera.lookAt(target.x, 1.6, target.z);
-}
+  setTimeOfDay(name) {
+    const s = SKIES[name] || SKIES.golden;
+    this.timeOfDay = name;
+    this.scene.background.setHex(s.bg);
+    this.scene.fog.color.setHex(s.fog);
+    this.sun.color.setHex(s.sun);
+    this.sun.intensity = s.sunI;
+    this.ambient.color.setHex(s.ambColor);
+    this.ambient.intensity = s.amb;
+  }
 
-// Third-person camera for walking: orbits the player with the mouse.
-export function updateWalkCamera(camera, player, dt, yaw, pitch) {
-  const dist = 7;
-  const cx = player.x - Math.sin(yaw) * Math.cos(pitch) * dist;
-  const cz = player.z - Math.cos(yaw) * Math.cos(pitch) * dist;
-  const cy = 2.4 + Math.sin(pitch) * dist;
-  const k = 1 - Math.exp(-dt * 10);
-  camera.position.x += (cx - camera.position.x) * k;
-  camera.position.y += (cy - camera.position.y) * k;
-  camera.position.z += (cz - camera.position.z) * k;
-  camera.lookAt(player.x, 1.7, player.z);
+  setCameraMode(mode) {
+    this.mode = mode;
+  }
+
+  // focus: {x, z, yaw} of the thing the camera follows; front: chase from ahead.
+  updateCamera(dt, focus, speed) {
+    const cam = this.camera;
+    const fwd = { x: Math.sin(focus.yaw), z: Math.cos(focus.yaw) };
+    let wantPos, wantLook;
+    if (this.mode === 'aerial') {
+      wantPos = this.aerialPos;
+      wantLook = this.aerialTarget;
+    } else if (this.mode === 'cover') {
+      wantPos = this.coverPos;
+      wantLook = this.coverTarget;
+    } else if (this.mode === 'front') {
+      wantPos = new THREE.Vector3(focus.x + fwd.x * 15, 4.2, focus.z + fwd.z * 15);
+      wantLook = new THREE.Vector3(focus.x - fwd.x * 4, 2, focus.z - fwd.z * 4);
+    } else {
+      const dist = 10 + Math.min(4, Math.abs(speed || 0) * 0.08);
+      wantPos = new THREE.Vector3(focus.x - fwd.x * dist, 4.6, focus.z - fwd.z * dist);
+      wantLook = new THREE.Vector3(focus.x + fwd.x * 8, 2, focus.z + fwd.z * 8);
+    }
+    const k = this.mode === 'chase' || this.mode === 'front' ? Math.min(1, dt * 5) : 1;
+    this.smoothPos.lerp(wantPos, k);
+    this.smoothLook.lerp(wantLook, k);
+    cam.position.copy(this.smoothPos);
+    cam.lookAt(this.smoothLook);
+  }
+
+  render() {
+    this.renderer.render(this.scene, this.camera);
+  }
 }

@@ -1,28 +1,31 @@
-// Save / load through localStorage. Money, debt, missions, upgrades and
-// position survive a reload; the game offers to continue where you left off.
+// Save and load. One job: persist the career (money, debt paid, jobs done,
+// upgrades, position) to localStorage and read it back, never crashing on
+// bad or missing data.
 
 import { CONFIG } from './config.js';
 
-export function saveGame(ctx) {
+export function saveGame(game) {
   try {
-    const p = ctx.player;
+    const p = game.player;
     const data = {
-      money: p.money,
-      debtPaid: p.debtPaid,
-      health: p.health,
-      missionsCompleted: ctx.missions.completed,
-      missionIndex: ctx.missions.index,
-      upgrades: p.upgrades,
-      x: p.car ? p.car.x : p.x,
-      z: p.car ? p.car.z : p.z,
-      angle: p.car ? p.car.angle : p.angle,
-      timeOfDay: ctx.timeOfDay,
-      station: ctx.audio.station,
-      savedAt: Date.now(),
+      money: Math.floor(p.money),
+      debtPaid: Math.floor(p.debtPaid),
+      completed: game.missions.completed,
+      index: game.missions.index,
+      upgrades: { ...p.upgrades },
+      health: Math.max(1, Math.floor(p.health)),
+      x: p.x,
+      z: p.z,
+      yaw: p.yaw,
+      mode: p.mode,
+      carX: p.car ? p.car.x : null,
+      carZ: p.car ? p.car.z : null,
+      carYaw: p.car ? p.car.yaw : 0,
+      timeOfDay: game.timeOfDay,
     };
     localStorage.setItem(CONFIG.saveKey, JSON.stringify(data));
     return true;
-  } catch (err) {
+  } catch (e) {
     return false;
   }
 }
@@ -34,7 +37,7 @@ export function loadGame() {
     const data = JSON.parse(raw);
     if (typeof data.money !== 'number') return null;
     return data;
-  } catch (err) {
+  } catch (e) {
     return null;
   }
 }
@@ -42,5 +45,5 @@ export function loadGame() {
 export function clearSave() {
   try {
     localStorage.removeItem(CONFIG.saveKey);
-  } catch (err) { /* storage is optional */ }
+  } catch (e) { /* best-effort */ }
 }
