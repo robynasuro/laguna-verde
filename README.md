@@ -1,4 +1,10 @@
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/robynasuro/laguna-verde/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/robynasuro/laguna-verde/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 # Laguna Verde: Carmen's Debt
+
+Built for the [Make GTA 6](https://make.fun/bounty/gta6-01) bounty on make.fun.
 
 I built this one because I wanted a crime game with a reason to drive, not just a map to drive around. Carmen is a mechanic. Her little brother Tomas owes $50,000 to a crew called Los Tiburones after wrecking their car, and she is the one paying it off, one job at a time, in a lagoon city at golden hour.
 
