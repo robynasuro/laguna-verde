@@ -1,46 +1,29 @@
-[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/robynasuro/laguna-verde/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/robynasuro/laguna-verde/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-
 # Laguna Verde: Carmen's Debt
 
-Built for the [Make GTA 6](https://make.fun/bounty/gta6-01) bounty on make.fun.
+[![make.fun](https://make.fun/badge/entry.svg)](https://make.fun) [![make.fun](https://make.fun/badge/competition/gta6-01.svg)](https://make.fun/c/gta6-01) [![make.fun](https://make.fun/badge/build.svg)](https://make.fun)
 
-The idea started with a question: what if a crime game gave you a real reason to drive? Carmen is a mechanic at her late father's garage, Garage del Sol, by the lagoon. Her little brother Tomas, nineteen and too fast for his own good, wrecked a car that belonged to Los Tiburones and now owes them $50,000. Carmen is the one paying it back, one driving job at a time, in a sun-soaked lagoon city at golden hour. I wrote the whole thing myself, in one recorded session, for the fourth round of this entry.
+I built this for the make.fun GTA 6 competition. It is a real 3D open-world crime game that runs in desktop Chrome from static files, no network, no build step. I wanted a city with a specific identity and a story with a personal stake, so I set it in Laguna Verde, a sun-soaked city around a turquoise lagoon, and I made the whole game about one debt.
 
-## The city
+You are Carmen, 28, a mechanic who runs her late father's garage by the lagoon, Garage del Sol. Her younger brother Tomas, 19, owes $50,000 to a crew called Los Tiburones after wrecking their car. You take driving jobs to pay it off. The debt meter in the HUD is the whole game: every mission pays, the garage sells upgrades, and the finale clears the debt for good.
 
-Laguna Verde is built around a turquoise lagoon: a causeway across the water, a marina full of boats, a boardwalk with a Ferris wheel, a lighthouse on the point, a canal district of colourful houses, hillside villas, and a downtown grid. You explore it on foot and by car, and the light changes with the time of day, from midday sun to golden hour to dusk.
+## What is in it
 
-## The story
+- A city to explore on foot and by car: a downtown grid, a canal district with colorful houses, a marina with boats, a boardwalk with a Ferris wheel, a lighthouse on the point, a causeway across the lagoon, and a hillside of villas. Golden-hour sun, turquoise water, palm trees.
+- Seven story missions with named clients and dialogue, from "First Fare" with Mrs. Alvarez to the finale, "Clear the Debt". Driving, pickup, a street race along the boardwalk, a getaway, a dusk smuggler's run over the causeway, a defend-the-garage job, and the last heist.
+- Traffic AI on the road grid, pedestrians on the sidewalks, and a 5-star wanted system. Police patrol cars chase and ram. A helicopter with a searchlight joins at three stars. Lay low and the heat cools off.
+- Cars to steal and drive, a pistol on foot, garage upgrades (engine tune, sport suspension, armored panels), three procedural radio stations, a HUD with a minimap, start and pause menus, and a save in localStorage.
 
-Seven jobs, each with a named client and a line of dialogue. It starts with a first fare for Mrs. Alvarez, who missed her bus, and it ends with one last job for El Tiburon himself, the job that clears the debt for good. In between there is a pickup gone wrong, a street race down the boardwalk, a getaway with the police on the radio, a smuggler's run over the causeway at dusk, and a night the Sharks come to the garage.
+## How to play
 
-## What you can do
+Serve the game folder with any static server and open `game/index.html` in desktop Chrome. Or run `node serve.ts` from the repo root and open http://localhost:8080.
 
-- Drive and walk the whole city. Traffic runs the road grid, pedestrians walk the sidewalks, and both of them react when you come through too fast.
-- Get a wanted level, 1 to 5 stars. Steal a car where the police can see you, hit a pedestrian, or fire a shot, and patrol cars come after you. At 3 stars the helicopter shows up with a spotlight. Stay out of sight and the heat cools off.
-- Steal any parked car or pull a driver out of a traffic car. Shoot with a pistol on foot when the Sharks show up.
-- Earn money from jobs and spend it at Garage del Sol on engine, handling, and armor upgrades.
-- Follow the yellow marker and the minimap. Health, money, the debt meter counting up to $50,000, wanted stars, and speed are all on the HUD.
-- Three radio stations, engine hum, sirens, and gunshots, all synthesized live in the browser. No audio files.
-- Save and continue from local storage, with a pause menu and mission complete and failed screens.
-
-## Controls
-
-Serve the `game/` folder with any static server and open `index.html` in desktop Chrome. Everything runs offline. Three.js is vendored under `game/vendor/`, nothing loads from the network.
-
-- `W A S D` move on foot, drive in a car. Mouse drag to look around.
-- `E` get in or out of a car. `Space` brake. `F` shoot. `R` change radio station.
-- `G` open the garage upgrades when you are standing at Garage del Sol. `T` change time of day. `P` pause. `M` mute.
-- Jobs start at the garage marker. Finish jobs, watch the debt meter climb toward $50,000, and keep the police off your tail.
+- WASD: drive and walk. Space: brake. E: enter and exit a car. Steal a parked or traffic car by pressing E near it, but the police notice.
+- F: shoot the pistol on foot. N: start the next mission. G: open the garage near Garage del Sol. R: change radio station. P: pause. T: time of day. M: mute.
 
 ## How it is built
 
-Plain ES modules, no build step. Three.js r160 vendored as a minified module build. The source is split by job, one file per system: `city.js` builds the city, `cars.js` the driving, `traffic.js` and `pedestrians.js` the street life, `police.js` the wanted level, `missions.js` the story, `combat.js` the shooting, `hud.js` the HUD and minimap, `audio.js` the sound, `save.js` the save, `render.js` the scene and camera, `input.js` the keys, `shots.js` the screenshot scenes, `main.js` the loop that ties it together.
+Three.js, vendored under `game/vendor/` as a minified build, so the game plays fully offline. The source is split into one file per job: `world.js` lays the city out, `city.js` builds it in 3D, `cars.js` drives, `traffic.js` and `pedestrians.js` fill the streets, `police.js` runs the wanted level and the helicopter, `missions.js` tells the story, `combat.js` shoots, `audio.js` synthesizes every sound, `hud.js` draws the HUD and minimap, `save.js` keeps your progress, and `main.js` wires it all together. `main.ts` hands the game in by copying `game/` and `screenshots/` to the output and writing the dossier with the vendored make.fun library.
 
-Everything here is original: the city, the characters, the names, the story, the art, and the sound. No Rockstar material, no GTA names, no copied maps.
+Everything here is original: the city, the names, the characters, the story, the art, and the music. Nothing is borrowed from any commercial game.
 
-## License
-
-MIT. See LICENSE.
+Built with make.fun. Play it at [make.fun](https://make.fun).

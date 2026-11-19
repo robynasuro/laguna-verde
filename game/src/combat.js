@@ -1,114 +1,126 @@
-// Combat: the pistol, rival crew enemies, shooting and getting shot. One
-// job: fighting on foot.
-import * as THREE from '../vendor/three.module.min.js';
+// Combat. One job: the pistol — aim, shoot, hit, and the mission
+// enemies who shoot back. Simple raycast hits, visible tracers,
+// health, and a clear line between a fair fight and a dead player.
 
-const AIM_RANGE = 60;
-const AIM_COS = 0.94;
-const FIRE_INTERVAL = 0.28;
-const ENEMY_HP = 3;
+import * as THREE from 'three';
+import { CONFIG } from './config.js';
 
-function makeRivalMesh() {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.34, 0.4, 1.05, 8),
-    new THREE.MeshLambertMaterial({ color: 0x223344 }),
-  );
-  body.position.y = 1.0;
-  body.castShadow = true;
-  g.add(body);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.26, 10, 8),
-    new THREE.MeshLambertMaterial({ color: 0xe8b98a }),
-  );
-  head.position.y = 1.78;
-  g.add(head);
-  const vest = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 0.5, 0.3),
-    new THREE.MeshLambertMaterial({ color: 0x8b2e2e }),
-  );
-  vest.position.set(0, 1.15, 0.2);
-  g.add(vest);
-  return g;
-}
+export class Combat {
+  constructor(scene, rng) {
+    this.scene = scene;
+    this.rng = rng;
+    this.enemies = [];
+    this.cooldown = 0;
+    this.tracers = [];
+    this.raycaster = new THREE.Raycaster();
+    this.ammo = Infinity; // a mechanic's pistol, always loaded
+  }
 
-export function createCombat(scene, rng) {
-  const C = { enemies: [], bullets: [], ammo: 24, lastShot: 0 };
-
-  function spawnRivals(x, z, count) {
+  // Spawn mission enemies around a point (the defend mission).
+  spawnEnemies(center, count, onDown) {
     for (let i = 0; i < count; i++) {
-      const g = makeRivalMesh();
-      g.position.set(x + (rng() - 0.5) * 14, 0, z + (rng() - 0.5) * 14);
-      scene.add(g);
-      C.enemies.push({ mesh: g, pos: g.position, hp: ENEMY_HP, shootTimer: 1 + rng() * 2 });
+      const group = new THREE.Group();
+      const shirt = new THREE.MeshLambertMaterial({ color: 0x222222 });
+      const skin = new THREE.MeshLambertMaterial({ color: 0xc68e5e });
+      const box = new THREE.BoxGeometry(1, 1, 1);
+      const torso = new THREE.Mesh(box, shirt);
+      torso.scale.set(0.6, 0.7, 0.32);
+      torso.position.y = 1.15;
+      const head = new THREE.Mesh(box, skin);
+      head.scale.set(0.36, 0.36, 0.36);
+      head.position.y = 1.68;
+      const legL = new THREE.Mesh(box, shirt);
+      legL.scale.set(0.2, 0.7, 0.22);
+      legL.position.set(-0.14, 0.35, 0);
+      const legR = legL.clone();
+      legR.position.x = 0.14;
+      const gun = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x111111 }));
+      gun.scale.set(0.1, 0.1, 0.5);
+      gun.position.set(0.3, 1.2, 0.3);
+      group.add(torso, head, legL, legR, gun);
+      const angle = (i / count) * Math.PI * 2;
+      const x = center.x + Math.cos(angle) * 18;
+      const z = center.z + Math.sin(angle) * 18;
+      group.position.set(x, 0, z);
+      this.scene.add(group);
+      this.enemies.push({ mesh: group, health: CONFIG.enemyHealth, shootTimer: 1 + i, onDown });
     }
   }
 
-  // Nearest enemy inside a narrow cone of the aim direction, if any.
-  function aimTarget(from, dir) {
-    let best = null;
-    let bestD = AIM_RANGE + 1;
-    for (const e of C.enemies) {
-      const dx = e.pos.x - from.x;
-      const dz = e.pos.z - from.z;
-      const d = Math.hypot(dx, dz);
-      if (d > AIM_RANGE) continue;
-      const dot = (dx * dir.x + dz * dir.z) / d;
-      if (dot > AIM_COS && d < bestD) {
-        best = e;
-        bestD = d;
+  clearEnemies() {
+    for (const e of this.enemies) this.scene.remove(e.mesh);
+    this.enemies = [];
+  }
+
+  enemyCount() {
+    return this.enemies.length;
+  }
+
+  // The player fires from the camera direction. Returns the enemy hit.
+  shoot(origin, direction, playerPos) {
+    if (this.cooldown > 0) return null;
+    this.cooldown = CONFIG.pistolRate;
+    this.raycaster.set(origin, direction);
+    this.raycaster.far = CONFIG.pistolRange;
+    const meshes = this.enemies.map((e) => e.mesh);
+    const hits = this.raycaster.intersectObjects(meshes, true);
+    this.spawnTracer(origin, direction);
+    if (hits.length === 0) return null;
+    const hitObj = hits[0].object;
+    const enemy = this.enemies.find((e) => e.mesh === hitObj || e.mesh.children.includes(hitObj));
+    if (!enemy) return null;
+    enemy.health -= CONFIG.pistolDamage;
+    if (enemy.health <= 0) {
+      this.scene.remove(enemy.mesh);
+      this.enemies = this.enemies.filter((e) => e !== enemy);
+      if (enemy.onDown) enemy.onDown();
+      return enemy;
+    }
+    return enemy;
+  }
+
+  spawnTracer(origin, direction) {
+    const end = origin.clone().add(direction.clone().multiplyScalar(CONFIG.pistolRange));
+    const geo = new THREE.BufferGeometry().setFromPoints([origin, end]);
+    const line = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9 }),
+    );
+    this.scene.add(line);
+    this.tracers.push({ line, life: 0.08 });
+  }
+
+  update(dt, playerPos, onPlayerHit) {
+    if (this.cooldown > 0) this.cooldown -= dt;
+    for (const t of this.tracers) {
+      t.life -= dt;
+      if (t.life <= 0) {
+        this.scene.remove(t.line);
+        t.line.geometry.dispose();
       }
     }
-    return best;
-  }
+    this.tracers = this.tracers.filter((t) => t.life > 0);
 
-  function shoot(from, dir, audio) {
-    const now = performance.now() / 1000;
-    // Fire rate cap, and an empty gun does nothing.
-    if (now - C.lastShot < FIRE_INTERVAL || C.ammo <= 0) return false;
-    C.lastShot = now;
-    C.ammo -= 1;
-    audio.shot();
-    const target = aimTarget(from, dir);
-    if (!target) return 'miss';
-    target.hp -= 1;
-    // The hit shoves the rival back a step.
-    target.mesh.position.x += dir.x * 0.4;
-    target.mesh.position.z += dir.z * 0.4;
-    if (target.hp <= 0) {
-      scene.remove(target.mesh);
-      C.enemies.splice(C.enemies.indexOf(target), 1);
-      return 'kill';
-    }
-    return 'hit';
-  }
-
-  function update(dt, playerPos, onPlayerHit) {
-    for (const e of [...C.enemies]) {
-      const dx = playerPos.x - e.pos.x;
-      const dz = playerPos.z - e.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d > 2.5) {
-        e.pos.x += (dx / d) * 3.2 * dt;
-        e.pos.z += (dz / d) * 3.2 * dt;
-        e.mesh.rotation.y = Math.atan2(dx, dz);
+    // Enemies walk toward the player and fire when close enough.
+    for (const e of this.enemies) {
+      const dx = playerPos.x - e.mesh.position.x;
+      const dz = playerPos.z - e.mesh.position.z;
+      const dist = Math.hypot(dx, dz);
+      e.mesh.rotation.y = Math.atan2(dx, dz);
+      if (dist > 14) {
+        e.mesh.position.x += (dx / dist) * 3.2 * dt;
+        e.mesh.position.z += (dz / dist) * 3.2 * dt;
       }
       e.shootTimer -= dt;
-      if (e.shootTimer <= 0 && d < 45) {
-        e.shootTimer = 2.2 + rng() * 1.5;
-        // Rivals miss more often than they hit.
-        if (rng() < 0.45) onPlayerHit(6 + Math.floor(rng() * 8));
+      if (e.shootTimer <= 0 && dist < 40) {
+        e.shootTimer = 1.6 + this.rng.next() * 0.8;
+        // Inaccurate on purpose: most shots miss, some sting.
+        if (this.rng.next() < 0.3) onPlayerHit(8);
+        const from = e.mesh.position.clone().setY(1.3);
+        const to = new THREE.Vector3(playerPos.x, 1.2, playerPos.z);
+        const dir = to.clone().sub(from).normalize();
+        this.spawnTracer(from, dir);
       }
     }
   }
-
-  function clearEnemies() {
-    for (const e of C.enemies) scene.remove(e.mesh);
-    C.enemies = [];
-  }
-
-  C.spawnRivals = spawnRivals;
-  C.shoot = shoot;
-  C.update = update;
-  C.clearEnemies = clearEnemies;
-  return C;
 }

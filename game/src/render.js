@@ -1,87 +1,140 @@
-// Renderer, lights, sky and the chase camera. One job: own the Three.js
-// scene and put the camera where it belongs. No gameplay rules live here.
-import * as THREE from '../vendor/three.module.min.js';
+// The renderer. One job: the Three.js renderer, the golden-hour
+// lighting, the sky, and the chase camera that follows the player
+// smoothly — on foot or in a car — plus the time-of-day cycle.
 
-// Sky, fog, sun and pier light for each time of day: 0 noon, 1 golden hour,
-// 2 dusk. One table drives setTimeOfDay, so the look stays consistent.
-const DAY_PHASES = [
-  { sky: 0x87ceeb, sun: 0xfff2cc, sunPower: 2.6, pier: 0 },
-  { sky: 0xffc98a, sun: 0xffd9a0, sunPower: 2.2, pier: 0 },
-  { sky: 0x2a3a5e, sun: 0xff9f6e, sunPower: 0.7, pier: 1.6 },
-];
+import * as THREE from 'three';
+import { CONFIG } from './config.js';
 
-export function createRender(canvas) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  // ?noshadow=1 switches the shadow pass off. Headless playtests run under
-  // software rendering where shadows are slow; the shipped game keeps them.
-  renderer.shadowMap.enabled = !new URLSearchParams(location.search).has('noshadow');
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+export class Render {
+  constructor(canvas) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = false;
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(CONFIG.skyHorizon);
+    this.scene.fog = new THREE.Fog(CONFIG.fogColor, CONFIG.fogNear, CONFIG.fogFar);
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(DAY_PHASES[1].sky);
-  scene.fog = new THREE.Fog(DAY_PHASES[1].sky, 220, 620);
-  const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
-
-  // Low golden sun from the west, so the lagoon side catches the light.
-  const sun = new THREE.DirectionalLight(DAY_PHASES[1].sun, DAY_PHASES[1].sunPower);
-  sun.position.set(-180, 120, -80);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  Object.assign(sun.shadow.camera, { left: -260, right: 260, top: 260, bottom: -260, far: 700 });
-  scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x8a6a4a, 0.9));
-  // Warm point light over the pier that only matters at dusk.
-  const pierGlow = new THREE.PointLight(0xff9f2e, 0, 120);
-  pierGlow.position.set(-195, 30, 0);
-  scene.add(pierGlow);
-
-  // Smoothed camera state, so the view eases instead of snapping.
-  const cam = {
-    pos: new THREE.Vector3(0, 10, 20),
-    look: new THREE.Vector3(),
-    yaw: 0.6,
-    pitch: 0.32,
-  };
-
-  function resize() {
-    const w = canvas.clientWidth || innerWidth;
-    const h = canvas.clientHeight || innerHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
-  addEventListener('resize', resize);
-  resize();
-
-  function setTimeOfDay(t) {
-    const phase = DAY_PHASES[Math.max(0, Math.min(2, t))];
-    scene.background.set(phase.sky);
-    scene.fog.color.set(phase.sky);
-    sun.intensity = phase.sunPower;
-    sun.color.set(phase.sun);
-    pierGlow.intensity = phase.pier;
-  }
-
-  // Chase camera: ease toward a point behind the target, look a little
-  // above it. Turns feel smooth because the camera lags the heading.
-  function updateCamera(target, yaw, pitch, dist, dt) {
-    const desired = new THREE.Vector3(
-      target.x - Math.sin(yaw) * Math.cos(pitch) * dist,
-      target.y + Math.sin(pitch) * dist + 2,
-      target.z - Math.cos(yaw) * Math.cos(pitch) * dist,
+    this.camera = new THREE.PerspectiveCamera(
+      62, window.innerWidth / window.innerHeight, 0.1, 2000,
     );
-    const ease = 1 - Math.exp(-6 * dt);
-    const lookEase = 1 - Math.exp(-8 * dt);
-    cam.pos.lerp(desired, ease);
-    cam.look.lerp(target, lookEase);
-    camera.position.copy(cam.pos);
-    camera.lookAt(cam.look.x, cam.look.y + 1.5, cam.look.z);
+    this.camera.position.set(0, 30, -60);
+
+    // Golden-hour sun: low, warm, from the west over the lagoon.
+    this.sun = new THREE.DirectionalLight(CONFIG.sunColor, CONFIG.sunIntensity);
+    this.sun.position.set(-300, 180, -120);
+    this.scene.add(this.sun);
+    this.hemi = new THREE.HemisphereLight(0x9fc8e8, 0x8a6a4a, 0.9);
+    this.scene.add(this.hemi);
+
+    // Sky dome: a big gradient sphere that never moves with the camera.
+    const skyGeo = new THREE.SphereGeometry(1200, 16, 12);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        top: { value: new THREE.Color(CONFIG.skyTop) },
+        horizon: { value: new THREE.Color(CONFIG.skyHorizon) },
+        sunDir: { value: new THREE.Vector3(-0.8, 0.35, -0.3).normalize() },
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        varying vec3 vDir;
+        uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir;
+        void main() {
+          float h = clamp(vDir.y, 0.0, 1.0);
+          vec3 col = mix(horizon, top, pow(h, 0.7));
+          float sun = pow(max(dot(normalize(vDir), sunDir), 0.0), 24.0);
+          col += vec3(1.0, 0.75, 0.4) * sun * 0.9;
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    });
+    this.sky = new THREE.Mesh(skyGeo, skyMat);
+    this.scene.add(this.sky);
+
+    this.timeOfDay = 0.72; // 0 = dawn, 0.5 = noon, 0.72 = golden hour, 1 = night
+    this.camPos = new THREE.Vector3(0, 30, -60);
+    this.camLook = new THREE.Vector3(0, 0, 0);
+    this.shake = 0;
+
+    window.addEventListener('resize', () => {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    });
   }
 
-  function render() {
-    renderer.render(scene, camera);
+  // The sun slides across the sky as timeOfDay moves; golden hour is
+  // the warm default, dusk turns the headlights on.
+  setTimeOfDay(t) {
+    this.timeOfDay = t;
+    const angle = t * Math.PI * 2 - Math.PI / 2;
+    const height = Math.sin(angle);
+    this.sun.position.set(Math.cos(angle) * 400, 60 + height * 260, -140);
+    const warm = 1 - Math.abs(height) * 0.4;
+    this.sun.color.setHSL(0.08, 0.85, 0.55 + warm * 0.15);
+    this.sun.intensity = 1.2 + Math.max(0, height) * 1.4;
+    this.hemi.intensity = 0.5 + Math.max(0, height) * 0.5;
+    const dusk = height < 0.25;
+    this.scene.fog.color.setHex(dusk ? 0x8a6a72 : CONFIG.fogColor);
+    return dusk;
   }
 
-  return { renderer, scene, camera, sun, setTimeOfDay, updateCamera, resize, render, cam };
+  get isDusk() {
+    const angle = this.timeOfDay * Math.PI * 2 - Math.PI / 2;
+    return Math.sin(angle) < 0.25;
+  }
+
+  // Chase camera: behind and above the target, smoothed, with a
+  // little shake on hard impacts.
+  follow(target, heading, dt, inCar) {
+    const dist = inCar ? 13 : 9;
+    const height = inCar ? 5.2 : 4.2;
+    const back = new THREE.Vector3(
+      -Math.sin(heading) * dist,
+      height,
+      -Math.cos(heading) * dist,
+    );
+    const want = new THREE.Vector3(target.x, 0, target.z).add(back);
+    const k = 1 - Math.exp(-dt * 5);
+    this.camPos.lerp(want, k);
+    const look = new THREE.Vector3(
+      target.x + Math.sin(heading) * 6,
+      1.6,
+      target.z + Math.cos(heading) * 6,
+    );
+    this.camLook.lerp(look, 1 - Math.exp(-dt * 7));
+    let sx = 0;
+    let sy = 0;
+    if (this.shake > 0.01) {
+      sx = (Math.random() - 0.5) * this.shake;
+      sy = (Math.random() - 0.5) * this.shake;
+      this.shake *= Math.exp(-dt * 6);
+    }
+    this.camera.position.set(this.camPos.x + sx, this.camPos.y + sy, this.camPos.z);
+    this.camera.lookAt(this.camLook.x, this.camLook.y, this.camLook.z);
+    this.sky.position.copy(this.camera.position);
+  }
+
+  // A fixed cinematic camera, for shots and the menu backdrop.
+  setCamera(pos, look) {
+    this.camPos.set(pos.x, pos.y, pos.z);
+    this.camLook.set(look.x, look.y, look.z);
+    this.camera.position.set(pos.x, pos.y, pos.z);
+    this.camera.lookAt(look.x, look.y, look.z);
+    this.sky.position.copy(this.camera.position);
+  }
+
+  addShake(amount) {
+    this.shake = Math.min(1.2, this.shake + amount);
+  }
+
+  render() {
+    this.renderer.render(this.scene, this.camera);
+  }
 }

@@ -1,180 +1,137 @@
-<!-- Laguna Verde: Carmen's Debt. Round 4 rebuild, written in the recorded session. -->
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
 <title>Laguna Verde: Carmen's Debt</title>
 <style>
-  /* Page frame: the canvas fills the window, HUD floats over it. */
-  html, body {
-    margin: 0; height: 100%; overflow: hidden;
-    background: #1a2a33; font-family: Verdana, Geneva, sans-serif;
-  }
-  #game {
-    position: fixed; inset: 0; width: 100%; height: 100%;
-    display: block; touch-action: none;
-  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a20; font-family: Georgia, 'Times New Roman', serif; }
+  #game { display: block; width: 100%; height: 100%; }
+  .hidden { display: none !important; }
 
-  /* HUD: pointer-events off so the canvas keeps the mouse. */
-  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; display: none; }
-  #hud .panel {
-    background: rgba(10, 20, 26, 0.62);
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 8px; padding: 8px 12px;
-  }
-  #topleft { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
-  #stars { font-size: 22px; letter-spacing: 3px; color: #ffd23e; text-shadow: 0 1px 3px #000; }
-  #stars .off { color: rgba(255,255,255,0.35); }
-  #healthbar { width: 180px; height: 10px; background: rgba(0,0,0,0.55); border-radius: 5px; overflow: hidden; }
-  #healthfill { height: 100%; width: 100%; background: #3ddc74; }
-  #money { font-size: 18px; font-weight: bold; text-shadow: 0 1px 3px #000; }
-  #debt { font-size: 12px; }
-  #debtbar { width: 180px; height: 8px; background: rgba(0,0,0,0.55); border-radius: 4px; overflow: hidden; }
-  #debtfill { height: 100%; width: 0%; background: #ff9f2e; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); z-index: 5; }
+  #top-left { position: absolute; top: 14px; left: 14px; }
+  #health-bar { width: 180px; height: 12px; background: rgba(0,0,0,.55); border: 1px solid #fff3; border-radius: 6px; overflow: hidden; }
+  #health-fill { height: 100%; width: 100%; background: #4caf50; }
+  #health-text { font-size: 12px; margin-top: 2px; }
+  #money { font-size: 22px; font-weight: bold; margin-top: 6px; color: #ffd23e; }
+  #debt-wrap { margin-top: 6px; width: 200px; }
+  #debt-label { font-size: 11px; letter-spacing: 1px; color: #ffb3a0; }
+  #debt-bar { height: 8px; background: rgba(0,0,0,.55); border: 1px solid #fff3; border-radius: 4px; overflow: hidden; }
+  #debt-fill { height: 100%; width: 0%; background: #e2725b; }
+  #debt-text { font-size: 11px; margin-top: 2px; }
+  #stars { font-size: 26px; letter-spacing: 4px; margin-top: 6px; color: #ffd23e; }
+  #stars.hot { animation: pulse .5s infinite alternate; }
+  @keyframes pulse { from { opacity: 1; } to { opacity: .55; } }
 
-  /* Minimap sits top right; speed bottom right; objective bottom left. */
-  #minimap {
-    position: absolute; top: 12px; right: 12px;
-    border: 2px solid rgba(255,255,255,0.35); border-radius: 50%;
-    background: #0d2b33; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-  }
-  #speedo { position: absolute; right: 16px; bottom: 14px; text-align: right; text-shadow: 0 1px 3px #000; }
-  #speed { font-size: 34px; font-weight: bold; }
-  #veh { font-size: 13px; opacity: 0.9; }
-  #objective {
-    position: absolute; left: 12px; bottom: 14px; max-width: 420px;
-    font-size: 14px; line-height: 1.45; text-shadow: 0 1px 3px #000;
-  }
-  #objective b { color: #ffd23e; }
+  #top-right { position: absolute; top: 14px; right: 14px; text-align: right; }
+  #minimap { width: 180px; height: 180px; border: 2px solid rgba(255,255,255,.5); border-radius: 4px; background: #2a2a30; }
+  #speed { font-size: 20px; margin-top: 6px; }
+  #vehicle { font-size: 13px; color: #ddd; }
+  #station { font-size: 13px; color: #ffd98a; margin-top: 2px; }
 
-  /* Centre flash message, dialogue box, radio readout, crosshair. */
-  #msg {
-    position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
-    font-size: 20px; font-weight: bold; text-align: center; text-shadow: 0 2px 6px #000;
-  }
-  #dialog {
-    position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%);
-    width: 560px; max-width: 86vw;
-    background: rgba(8, 18, 24, 0.82); border-left: 4px solid #ff9f2e; border-radius: 6px;
-    padding: 10px 14px; font-size: 14px; line-height: 1.5; display: none;
-  }
-  #dialog .who { color: #ffd23e; font-weight: bold; }
-  #radio {
-    position: absolute; right: 16px; top: 210px;
-    font-size: 12px; text-align: right; text-shadow: 0 1px 3px #000; opacity: 0.9;
-  }
-  #crosshair {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
-    font-size: 20px; display: none; color: #fff; text-shadow: 0 0 4px #000;
-  }
-  #toast {
-    position: fixed; left: 50%; bottom: 170px; transform: translateX(-50%);
-    background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 6px;
-    color: #fff; font-size: 14px; display: none; z-index: 20; pointer-events: none;
-  }
+  #objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); padding: 8px 16px; border-radius: 4px; font-size: 15px; max-width: 60%; text-align: center; }
+  #messages { position: absolute; left: 14px; bottom: 14px; max-width: 420px; }
+  .msg { background: rgba(0,0,0,.6); padding: 6px 10px; margin-top: 6px; border-radius: 4px; font-size: 14px; }
 
-  /* Full-screen menus: menu, pause, garage, end screen. */
-  .screen {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(160deg, rgba(8,30,40,0.88), rgba(60,20,10,0.82));
-    color: #fff; z-index: 10;
-  }
-  .card {
-    max-width: 640px; width: 92vw;
-    background: rgba(10,22,28,0.92);
-    border: 1px solid rgba(255,210,62,0.45); border-radius: 12px;
-    padding: 26px 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-  }
-  .card h1 { margin: 0 0 4px; font-size: 34px; letter-spacing: 1px; color: #ffd23e; }
-  .card h2 { margin: 0 0 10px; font-size: 15px; font-weight: normal; color: #9fd8e8; }
-  .card p { font-size: 14px; line-height: 1.6; color: #e8e8e8; }
-  .card ul { font-size: 13px; line-height: 1.7; color: #d8d8d8; }
-  .card kbd { background: #223; border: 1px solid #667; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
-  .btn {
-    pointer-events: auto; cursor: pointer; display: inline-block;
-    margin: 6px 8px 0 0; padding: 11px 22px;
-    border: none; border-radius: 8px;
-    background: #ff9f2e; color: #1a1000; font-size: 16px; font-weight: bold;
-  }
-  .btn.alt { background: #2e6f7e; color: #fff; }
-  .btn:hover { filter: brightness(1.12); }
-  #garage { display: none; }
-  .upg {
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.12); font-size: 14px;
-  }
+  #dialogue { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); width: 560px; max-width: 86%; background: rgba(20,16,12,.85); border-left: 4px solid #f2a541; padding: 12px 16px; border-radius: 4px; opacity: 0; transition: opacity .3s; }
+  #dialogue.show { opacity: 1; }
+  #dialogue-who { color: #f2a541; font-weight: bold; font-size: 14px; }
+  #dialogue-line { font-size: 16px; font-style: italic; margin-top: 4px; }
+
+  #toast { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); background: rgba(0,0,0,.65); padding: 6px 14px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity .3s; }
+  #toast.show { opacity: 1; }
+
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(10,8,6,.72); z-index: 10; }
+  .panel { background: #241a12; border: 2px solid #f2a541; border-radius: 10px; padding: 28px 36px; max-width: 620px; color: #f5e6c8; text-align: center; }
+  .panel h1 { font-size: 42px; color: #f2a541; letter-spacing: 1px; }
+  .panel h2 { font-size: 26px; color: #f2a541; margin-bottom: 10px; }
+  .panel p { font-size: 16px; line-height: 1.5; margin: 10px 0; color: #e8dcc8; }
+  .panel .controls { text-align: left; font-size: 14px; line-height: 1.9; margin: 14px auto; display: inline-block; }
+  .panel button { pointer-events: auto; cursor: pointer; background: #e2725b; color: #fff; border: none; font-size: 18px; padding: 12px 30px; border-radius: 6px; margin-top: 12px; font-family: inherit; }
+  .panel button:hover { background: #ef8354; }
+  .panel button:disabled { background: #555; cursor: default; }
+  .upgrade { display: flex; justify-content: space-between; align-items: center; gap: 16px; background: rgba(255,255,255,.06); padding: 10px 14px; border-radius: 6px; margin: 8px 0; text-align: left; }
+  .upgrade button { margin-top: 0; padding: 8px 16px; font-size: 15px; }
+  .upgrade.owned { opacity: .75; }
+  #garage .panel { width: 560px; }
+  #result .panel { width: 520px; }
 </style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Laguna Verde: Carmen's Debt. An open world crime game. Drive, walk, take missions, pay off a debt."></canvas>
+<canvas id="game"></canvas>
 
-<div id="hud">
-  <div id="topleft">
-    <div id="stars"></div>
-    <div class="panel">
-      <div id="healthbar"><div id="healthfill"></div></div>
-      <div id="money">$0</div>
-      <div id="debt">Debt paid: $0 / $50,000</div>
-      <div id="debtbar"><div id="debtfill"></div></div>
+<div id="hud" class="hidden">
+  <div id="top-left">
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="health-text">100</div>
+    <div id="money">$250</div>
+    <div id="debt-wrap">
+      <div id="debt-label">TOMAS'S DEBT</div>
+      <div id="debt-bar"><div id="debt-fill"></div></div>
+      <div id="debt-text">$0 / $50,000</div>
     </div>
+    <div id="stars">☆☆☆☆☆</div>
   </div>
-  <canvas id="minimap" width="190" height="190"></canvas>
-  <div id="radio"></div>
-  <div id="speedo"><div id="speed">0</div><div id="veh">On foot</div></div>
+  <div id="top-right">
+    <canvas id="minimap" width="180" height="180"></canvas>
+    <div id="speed">on foot</div>
+    <div id="vehicle">On foot</div>
+    <div id="station">♪ Laguna FM</div>
+  </div>
   <div id="objective"></div>
-  <div id="msg"></div>
-  <div id="dialog"></div>
-  <div id="crosshair">+</div>
+  <div id="messages"></div>
+  <div id="dialogue"><div id="dialogue-who"></div><div id="dialogue-line"></div></div>
+  <div id="toast"></div>
 </div>
-<div id="toast"></div>
 
-<div class="screen" id="menu">
-  <div class="card">
-    <h1>LAGUNA VERDE</h1>
-    <h2>Carmen's Debt, an open world crime story</h2>
-    <p>Carmen runs her late father's garage by the lagoon. Her little brother Tomas owes $50,000 to a crew called Los Tiburones after wrecking their car. She takes driving jobs across town to pay it off, one fare at a time, while the police watch every corner.</p>
-    <ul>
-      <li>Drive and walk a full lagoon city: causeway, marina, boardwalk, Ferris wheel, lighthouse, downtown.</li>
-      <li>7 story missions, traffic, pedestrians, a 5 star wanted level, police chases and a helicopter.</li>
-      <li>Steal cars, race, run getaways, buy garage upgrades, save your progress.</li>
-    </ul>
-    <p><b>Controls:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move / drive &middot; <kbd>E</kbd> enter or exit a car &middot; mouse drag to look &middot; <kbd>Space</kbd> brake &middot; <kbd>F</kbd> shoot &middot; <kbd>R</kbd> radio &middot; <kbd>G</kbd> garage (at Garage del Sol) &middot; <kbd>P</kbd> pause &middot; <kbd>M</kbd> mute</p>
-    <button class="btn" id="btn-start">Start driving</button>
-    <button class="btn alt" id="btn-continue">Continue saved game</button>
+<div id="menu" class="overlay">
+  <div class="panel">
+    <h1>Laguna Verde</h1>
+    <p style="color:#f2a541; font-size:19px;">Carmen's Debt</p>
+    <p>My brother Tomas owes $50,000 to Los Tiburones, and they do not wait. I run my father's garage by the lagoon, and I drive the jobs that pay it off. One fare at a time.</p>
+    <div class="controls">
+      WASD drive and walk &nbsp;·&nbsp; E enter and exit a car<br>
+      Space brake &nbsp;·&nbsp; F shoot &nbsp;·&nbsp; N next mission<br>
+      G garage upgrades &nbsp;·&nbsp; R radio &nbsp;·&nbsp; P pause<br>
+      T time of day &nbsp;·&nbsp; M mute
+    </div>
+    <br>
+    <button id="menu-start">Start driving</button>
+    <p style="font-size:13px; color:#b8a888;">Seven jobs. One debt. The lagoon at golden hour.</p>
   </div>
 </div>
 
-<div class="screen" id="pause" style="display:none">
-  <div class="card">
-    <h1>Paused</h1>
-    <p id="pause-stats"></p>
-    <button class="btn" id="btn-resume">Back to the city</button>
-    <button class="btn alt" id="btn-save">Save now</button>
-    <button class="btn alt" id="btn-quit">Save and quit to menu</button>
+<div id="pause-menu" class="overlay hidden">
+  <div class="panel">
+    <h2>Paused</h2>
+    <p>Carmen is taking a breath. The debt is not going anywhere.</p>
+    <button id="resume-btn">Keep driving</button><br>
+    <button id="restart-btn">Restart from the garage</button>
   </div>
 </div>
 
-<div class="screen" id="garage" style="display:none">
-  <div class="card">
-    <h1>Garage del Sol</h1>
-    <h2>Carmen's garage. Spend what you earned on the car.</h2>
-    <div id="upgrades"></div>
-    <p id="garage-money"></p>
-    <button class="btn" id="btn-garage-close">Back to the street</button>
+<div id="result" class="overlay hidden">
+  <div class="panel">
+    <h2 id="result-title"></h2>
+    <p id="result-text"></p>
+    <button id="result-btn">Continue</button>
   </div>
 </div>
 
-<div class="screen" id="endscreen" style="display:none">
-  <div class="card">
-    <h1 id="end-title">Mission complete</h1>
-    <p id="end-text"></p>
-    <button class="btn" id="btn-end-ok">Keep driving</button>
+<div id="garage" class="overlay hidden">
+  <div class="panel">
+    <h2>Garage del Sol</h2>
+    <p>Spend the mission money where it matters. Your money: <span id="garage-money">$0</span></p>
+    <div id="garage-list"></div>
+    <button id="garage-close">Back to the street</button>
   </div>
 </div>
 
-<p id="status" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></p>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

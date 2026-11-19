@@ -1,30 +1,25 @@
-// Save and load for Laguna Verde. One job: keep career progress in
-// localStorage so Carmen can pick up where she left off, session after session.
+// Save and load. One job: the player's progress in localStorage —
+// money, debt paid, missions finished, upgrades, position, and
+// settings — so quitting mid-debt does not mean starting over.
+
 const KEY = 'laguna-verde-save-v1';
 
-function pack(G) {
-  return {
-    money: G.money,
-    debtPaid: G.debtPaid,
-    missionsDone: G.missionsDone,
-    upgrades: G.upgrades,
-    health: G.health,
-    pos: G.player ? [G.player.pos.x, G.player.pos.z] : [0, 0],
-    time: G.timeOfDay,
-    savedAt: Date.now(),
-  };
-}
-
-function valid(d) {
-  return d && typeof d.money === 'number' && typeof d.missionsDone === 'number';
-}
-
-export function saveGame(G) {
+export function saveGame(data) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(pack(G)));
+    const payload = {
+      version: 1,
+      savedAt: Date.now(),
+      money: data.money,
+      debtPaid: data.debtPaid,
+      missionsDone: data.missionsDone,
+      upgrades: data.upgrades,
+      player: data.player,
+      station: data.station,
+      muted: data.muted,
+    };
+    localStorage.setItem(KEY, JSON.stringify(payload));
     return true;
-  } catch {
-    // Storage can be full or blocked; the game keeps running either way.
+  } catch (e) {
     return false;
   }
 }
@@ -33,17 +28,22 @@ export function loadGame() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const d = JSON.parse(raw);
-    return valid(d) ? d : null;
-  } catch {
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1) return null;
+    return data;
+  } catch (e) {
     return null;
+  }
+}
+
+export function clearSave() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch (e) {
+    // Storage may be unavailable; the game plays on without it.
   }
 }
 
 export function hasSave() {
   return loadGame() !== null;
-}
-
-export function clearSave() {
-  try { localStorage.removeItem(KEY); } catch {}
 }

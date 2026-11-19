@@ -1,362 +1,324 @@
-// Laguna Verde: the city. Lagoon and causeway, pier and boardwalk, marina,
-// downtown grid, canal houses, hillside villas, lighthouse, palms. This file
-// only builds the static city. It hands back the colliders, the road graph
-// and the pieces the main loop animates (Ferris wheel, boats).
-import * as THREE from '../vendor/three.module.min.js';
+// Laguna Verde in 3D. One job: turn the layout from world.js into
+// meshes — ground, lagoon, roads, buildings, palms, the Ferris wheel,
+// the lighthouse, the causeway, the marina — and hand back the
+// colliders the physics needs and the landmarks the missions need.
 
-// Deterministic random, so the city is the same for every player.
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import * as THREE from 'three';
+import { CONFIG } from './config.js';
+import { makeRng } from './random.js';
 
-// The shared layout. Missions, traffic, police and the minimap all read
-// these numbers, so nothing disagrees about where things are.
-export const WORLD = {
-  bound: 260,
-  lagoonX: -150,
-  roadsX: [-120, -60, 0, 60, 120, 180],
-  roadsZ: [-180, -120, -60, 0, 60, 120, 180],
-  roadW: 12,
-  garage: { x: -132, z: 66 },
-  garageFront: { x: -132, z: 84 },
-  pier: { x: -195, z: 0 },
-  lighthouse: { x: -228, z: -185 },
-  marina: { x: -185, z: 100 },
+const PALETTE = {
+  downtown: [0xe8dcc8, 0xd9c4a5, 0xc9b18c, 0xbfae9e, 0xe0cfa8],
+  canal: [0xe2725b, 0xf2a541, 0x4fa8a0, 0x7fb069, 0xe9c46a, 0xef8354, 0x6d9dc5],
+  villas: [0xf5e6c8, 0xffe8d6, 0xfff1e0, 0xf3d9b0],
+  marina: [0xdfe9e6, 0xcfe0d8, 0xe8e2d0],
 };
 
-const PASTELS = [
-  0xffd9a0, 0xffb37a, 0xf28b82, 0x8ecae6, 0x90be6d,
-  0xf9c74f, 0xe07a5f, 0xfff3b0, 0xa8dadc, 0xe5989b,
-];
+function windowTexture(base, lit) {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = base;
+  g.fillRect(0, 0, 64, 128);
+  const rng = makeRng(7);
+  for (let y = 8; y < 120; y += 14) {
+    for (let x = 6; x < 58; x += 12) {
+      g.fillStyle = rng.next() < lit ? '#ffd98a' : '#2c3e50';
+      g.fillRect(x, y, 8, 9);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 
-export function buildCity(scene, rng) {
+export function buildCity(scene, layout, rng) {
   const colliders = [];
-  const group = new THREE.Group();
-  scene.add(group);
+  const animated = { wheel: null, beacon: null, water: null, boats: [] };
+  const addCollider = (x, z, hw, hd) => colliders.push({ x, z, hw, hd });
 
-  const hitbox = (x, z, hw, hd) =>
-    colliders.push({ x0: x - hw, z0: z - hd, x1: x + hw, z1: z + hd });
+  const lambert = (color) => new THREE.MeshLambertMaterial({ color });
+  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+  const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 10);
 
-  // A Lambert box that casts and receives shadows. Most of the city is one
-  // of these, in different sizes and colours.
-  function box(w, h, d, color, x, y, z) {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      new THREE.MeshLambertMaterial({ color }),
-    );
-    mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return mesh;
+  function box(x, y, z, w, h, d, mat, parent) {
+    const m = new THREE.Mesh(boxGeo, mat);
+    m.position.set(x, y, z);
+    m.scale.set(w, h, d);
+    (parent || scene).add(m);
+    return m;
   }
 
-  function ground(w, d, color, x, y, z, opacity = 1) {
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(w, d),
-      new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity }),
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, y, z);
-    mesh.receiveShadow = true;
-    return mesh;
+  // Ground: warm sand-toned land; the lagoon is a separate water plane.
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(820, 820),
+    lambert(0xcdb98a),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+
+  // Lagoon water, west of the city, turquoise and slightly transparent.
+  const waterMat = new THREE.MeshLambertMaterial({
+    color: CONFIG.waterColor,
+    transparent: true,
+    opacity: 0.92,
+  });
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(160, 820), waterMat);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(-330, 0.15, 0);
+  scene.add(water);
+  animated.water = water;
+  // The marina cove.
+  const cove = new THREE.Mesh(new THREE.PlaneGeometry(90, 130), waterMat);
+  cove.rotation.x = -Math.PI / 2;
+  cove.position.set(-235, 0.15, 160);
+  scene.add(cove);
+
+  // Beach strip along the lagoon shore and the east coast.
+  const sandMat = lambert(0xe8d9a8);
+  box(-258, 0.15, 0, 8, 0.3, 820, sandMat);
+  box(396, 0.15, 0, 8, 0.3, 820, sandMat);
+
+  // Roads: dark asphalt strips over the grid, plus the causeway deck.
+  const roadMat = lambert(0x3a3a40);
+  for (const c of layout.grid) {
+    box(c, 0.2, 0, CONFIG.roadWidth, 0.1, 500, roadMat);
+    box(0, 0.2, c, 500, 0.1, CONFIG.roadWidth, roadMat);
+  }
+  // Centre dashes, cheap and cheerful.
+  const dashMat = lambert(0xd8d8c8);
+  for (const c of layout.grid) {
+    for (let t = -240; t <= 240; t += 16) {
+      box(c, 0.28, t, 0.5, 0.05, 5, dashMat);
+      box(t, 0.28, c, 5, 0.05, 0.5, dashMat);
+    }
+  }
+  // Causeway deck across the lagoon: a low strip just above the water,
+  // so a car driving it sits on the deck, not inside it.
+  box(-315, 0.05, -80, 155, 0.3, layout.causeway.width, lambert(0x8a7f70));
+  for (let x = -380; x < -240; x += 12) {
+    box(x, 1.1, -86, 0.6, 2.0, 0.6, lambert(0x5a5248));
+    box(x, 1.1, -74, 0.6, 2.0, 0.6, lambert(0x5a5248));
   }
 
-  // Ground: dry land to the east, a sand strip, open water west and north.
-  group.add(ground(420, 540, 0x8a7a5a, 60, 0, 0));
-  group.add(ground(24, 540, 0xe8d49a, -138, 0.05, 0));
-  group.add(ground(220, 560, 0x1fa8b8, -260, 0.1, 0, 0.92));
-  group.add(ground(420, 60, 0x1fa8b8, 60, 0.1, -280, 0.92));
-
-  // The downtown grid, laid over the land.
-  const roadMat = new THREE.MeshLambertMaterial({ color: 0x3a3f45 });
-  for (const x of WORLD.roadsX) {
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.roadW, 520), roadMat);
-    road.rotation.x = -Math.PI / 2;
-    road.position.set(x, 0.08, 0);
-    road.receiveShadow = true;
-    group.add(road);
-  }
-  for (const z of WORLD.roadsZ) {
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(420, WORLD.roadW), roadMat);
-    road.rotation.x = -Math.PI / 2;
-    road.position.set(50, 0.08, z);
-    road.receiveShadow = true;
-    group.add(road);
-  }
-
-  // Causeway bridge across the lagoon at z = 0, with low rails on both sides.
-  group.add(box(120, 1.2, 16, 0x9a8f7a, -205, 0.6, 0));
-  group.add(box(120, 1, 1, 0xd8d0c0, -205, 1.6, -8));
-  group.add(box(120, 1, 1, 0xd8d0c0, -205, 1.6, 8));
-  // Pier deck out into the water, and the boardwalk along the shore.
-  group.add(box(70, 1, 18, 0xb98a5a, -182, 0.7, 0));
-  group.add(box(16, 0.6, 300, 0xc9a06a, -146, 0.4, 0));
-
-  // Downtown: one or two pastel buildings per block, heights varied.
-  const pick = () => PASTELS[Math.floor(rng() * PASTELS.length)];
-  for (const rx of WORLD.roadsX) {
-    for (const rz of WORLD.roadsZ) {
-      const cx = rx + 30;
-      const cz = rz + 30;
-      if (cx > 200 || cz > 210 || cx < -140) continue;
-      const count = 1 + Math.floor(rng() * 2);
-      for (let i = 0; i < count; i++) {
-        const bx = cx + (rng() - 0.5) * 26;
-        const bz = cz + (rng() - 0.5) * 26;
-        const w = 12 + rng() * 12;
-        const d = 12 + rng() * 12;
-        const h = 8 + rng() * rng() * 42;
-        group.add(box(w, h, d, pick(), bx, h / 2, bz));
-        group.add(box(w + 0.6, 0.8, d + 0.6, 0xffffff, bx, h + 0.3, bz));
-        hitbox(bx, bz, w / 2 + 0.5, d / 2 + 0.5);
-      }
+  // Buildings, one block at a time. Downtown towers get lit windows.
+  // No tower on a block a named landmark stands on: the garage, the
+  // hotel, the market, Casa Azul and the Sharks' den need clear ground.
+  const keepClear = [
+    layout.landmarks.garage, layout.landmarks.hotel, layout.landmarks.market,
+    layout.landmarks.canalHouse, layout.landmarks.sharksDen,
+  ];
+  const downtownTex = windowTexture('#cbb894', 0.45);
+  const towerMat = new THREE.MeshLambertMaterial({ map: downtownTex });
+  const roofMat = lambert(0x6b5a48);
+  let placed = 0;
+  for (let x = -240; x <= 240; x += 80) {
+    for (let z = -240; z <= 240; z += 80) {
+      if (Math.abs(x) < 40 && Math.abs(z) < 40) continue; // the plaza
+      if (keepClear.some((lm) => Math.hypot(x - lm.x, z - lm.z) < 42)) continue;
+      if (rng.next() < 0.18) continue; // a park or a parking lot
+      const w = rng.range(22, 34);
+      const d = rng.range(22, 34);
+      const h = rng.range(18, 64);
+      const bx = x + rng.range(-8, 8);
+      const bz = z + rng.range(-8, 8);
+      const b = box(bx, h / 2, bz, w, h, d, towerMat);
+      b.material = towerMat;
+      box(bx, h + 0.4, bz, w * 0.7, 0.8, d * 0.7, roofMat);
+      addCollider(bx, bz, w / 2 + 1, d / 2 + 1);
+      placed++;
     }
   }
 
-  // Canal district: low colourful houses along the south edge.
+  // The plaza: a fountain and benches in the middle of downtown.
+  const fountain = new THREE.Mesh(new THREE.CylinderGeometry(8, 10, 2, 16), lambert(0x9fc8d8));
+  fountain.position.set(0, 1, 0);
+  scene.add(fountain);
+
+  // Canal district: small colourful houses in rows.
   for (let i = 0; i < 26; i++) {
-    const x = -120 + rng() * 300;
-    const z = 200 + rng() * 40;
-    const w = 10 + rng() * 8;
-    const h = 6 + rng() * 6;
-    const d = 9 + rng() * 6;
-    group.add(box(w, h, d, pick(), x, h / 2, z));
-    group.add(box(w + 1, 1, d + 1, 0x8b2e2e, x, h + 0.5, z));
-    hitbox(x, z, w / 2 + 0.5, d / 2 + 0.5);
+    const x = rng.range(-200, 40);
+    const z = rng.range(150, 290);
+    if (layout.isWater(x, z)) continue;
+    const color = rng.pick(PALETTE.canal);
+    const w = rng.range(10, 16);
+    const d = rng.range(10, 16);
+    const h = rng.range(7, 13);
+    box(x, h / 2, z, w, h, d, lambert(color));
+    box(x, h + 1, z, w * 0.6, 2, d * 0.6, lambert(0x8a4b3a)); // roof
+    addCollider(x, z, w / 2 + 1, d / 2 + 1);
   }
 
-  // Hillside villas in the north east: cream walls, terracotta roofs.
-  for (let i = 0; i < 14; i++) {
-    const x = 150 + rng() * 80;
-    const z = -230 + rng() * 70;
-    const w = 14 + rng() * 8;
-    const h = 7 + rng() * 5;
-    const d = 12 + rng() * 6;
-    group.add(box(w, h, d, 0xfff1cf, x, h / 2, z));
-    group.add(box(w + 1, 1.2, d + 1, 0xc96f4a, x, h + 0.6, z));
-    hitbox(x, z, w / 2 + 0.5, d / 2 + 0.5);
+  // Villa hill: pale villas with red roofs.
+  for (let i = 0; i < 16; i++) {
+    const x = rng.range(-40, 220);
+    const z = rng.range(-380, -240);
+    const color = rng.pick(PALETTE.villas);
+    const w = rng.range(14, 22);
+    const d = rng.range(12, 18);
+    const h = rng.range(8, 12);
+    box(x, h / 2, z, w, h, d, lambert(color));
+    box(x, h + 1.2, z, w * 0.7, 2.4, d * 0.7, lambert(0xb4552d));
+    addCollider(x, z, w / 2 + 1, d / 2 + 1);
   }
 
-  // Garage del Sol, Carmen's garage, with a painted sign on the front.
-  const gx = WORLD.garage.x;
-  const gz = WORLD.garage.z;
-  group.add(box(26, 9, 18, 0xff9f2e, gx, 4.5, gz));
-  group.add(box(26.5, 2, 18.5, 0x1a2a33, gx, 9.5, gz));
-  const signCanvas = document.createElement('canvas');
-  signCanvas.width = 512;
-  signCanvas.height = 96;
-  const sctx = signCanvas.getContext('2d');
-  sctx.fillStyle = '#1a2a33';
-  sctx.fillRect(0, 0, 512, 96);
-  sctx.fillStyle = '#ffd23e';
-  sctx.font = 'bold 52px Verdana, sans-serif';
-  sctx.textAlign = 'center';
-  sctx.textBaseline = 'middle';
-  sctx.fillText('GARAGE DEL SOL', 256, 52);
-  const sign = new THREE.Mesh(
-    new THREE.PlaneGeometry(22, 4.1),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(signCanvas) }),
-  );
-  sign.position.set(gx, 7.2, gz + 9.2);
-  group.add(sign);
-  hitbox(gx, gz, 13.5, 9.5);
+  // Marina: low white sheds and docks, boats bobbing in the cove.
+  for (let i = 0; i < 8; i++) {
+    const x = -260 + rng.range(0, 50);
+    const z = 110 + i * 14;
+    box(x, 3, z, 16, 6, 10, lambert(rng.pick(PALETTE.marina)));
+    addCollider(x, z, 9, 6);
+  }
+  const boatMat = lambert(0xf2f2ee);
+  const hullMat = lambert(0x2e5f7a);
+  for (let i = 0; i < 6; i++) {
+    const boat = new THREE.Group();
+    const hull = new THREE.Mesh(boxGeo, hullMat);
+    hull.scale.set(3, 1.2, 9);
+    const deck = new THREE.Mesh(boxGeo, boatMat);
+    deck.scale.set(2.4, 0.8, 7);
+    deck.position.y = 0.9;
+    const mast = new THREE.Mesh(cylGeo, lambert(0x8a7a5a));
+    mast.scale.set(0.15, 7, 0.15);
+    mast.position.y = 4;
+    boat.add(hull, deck, mast);
+    boat.position.set(-222 - i * 6, 0.6, 120 + i * 16);
+    boat.rotation.y = rng.range(-0.3, 0.3);
+    scene.add(boat);
+    animated.boats.push(boat);
+  }
 
-  // Ferris wheel on the pier. The main loop spins it.
+  // Boardwalk: wooden deck along the east beach, with the Ferris wheel.
+  const boardMat = lambert(0x9a7a52);
+  box(300, 0.5, 0, 14, 0.6, 560, boardMat);
+  // The Ferris wheel: rim, spokes, gondolas, two support legs.
   const wheel = new THREE.Group();
-  wheel.position.set(WORLD.pier.x, 22, WORLD.pier.z);
-  group.add(wheel);
-  wheel.add(new THREE.Mesh(
-    new THREE.TorusGeometry(16, 0.7, 8, 40),
-    new THREE.MeshLambertMaterial({ color: 0xff5d8f }),
-  ));
-  const cabinColors = [0xffd23e, 0x3ec6ff, 0xff7a3e, 0x7dff8a];
+  const rimMat = lambert(0xe2725b);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(22, 0.9, 8, 32), rimMat);
+  wheel.add(rim);
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    const spoke = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.25, 0.25, 16, 6),
-      new THREE.MeshLambertMaterial({ color: 0xffffff }),
-    );
-    spoke.rotation.z = a;
-    spoke.translateY(8);
+    const spoke = new THREE.Mesh(boxGeo, rimMat);
+    spoke.scale.set(0.7, 43, 0.7);
+    spoke.position.set(Math.cos(a) * 10.5, Math.sin(a) * 10.5, 0);
+    spoke.rotation.z = a + Math.PI / 2;
     wheel.add(spoke);
-    wheel.add(box(3, 2.4, 2.4, cabinColors[i % 4], Math.cos(a) * 16, Math.sin(a) * 16, 0));
+    const gondola = new THREE.Mesh(boxGeo, lambert(0xf2a541));
+    gondola.scale.set(3, 3, 3);
+    gondola.position.set(Math.cos(a) * 22, Math.sin(a) * 22, 0);
+    wheel.add(gondola);
   }
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.2, 1.2, 2, 12),
-    new THREE.MeshLambertMaterial({ color: 0xffffff }),
-  );
-  hub.rotation.x = Math.PI / 2;
-  wheel.add(hub);
-  const legL = box(1.2, 24, 1.2, 0xffffff, WORLD.pier.x - 6, 11, WORLD.pier.z);
-  const legR = box(1.2, 24, 1.2, 0xffffff, WORLD.pier.x + 6, 11, WORLD.pier.z);
-  legL.rotation.z = 0.35;
-  legR.rotation.z = -0.35;
-  group.add(legL);
-  group.add(legR);
+  wheel.position.set(312, 26, 40);
+  scene.add(wheel);
+  animated.wheel = wheel;
+  const legMat = lambert(0x5a5248);
+  const legL = new THREE.Mesh(cylGeo, legMat);
+  legL.scale.set(1, 26, 1);
+  legL.position.set(306, 13, 40);
+  legL.rotation.z = 0.3;
+  const legR = legL.clone();
+  legR.position.set(318, 13, 40);
+  legR.rotation.z = -0.3;
+  scene.add(legL, legR);
+  addCollider(312, 40, 6, 6);
 
-  // Lighthouse on the point: striped tower on a rock, glowing lamp.
-  const lx = WORLD.lighthouse.x;
-  const lz = WORLD.lighthouse.z;
-  const rock = new THREE.Mesh(
-    new THREE.CylinderGeometry(14, 18, 4, 10),
-    new THREE.MeshLambertMaterial({ color: 0x6b7c85 }),
-  );
-  rock.position.set(lx, 2, lz);
-  group.add(rock);
-  for (let i = 0; i < 5; i++) {
-    const seg = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.4 - i * 0.25, 3.8 - i * 0.25, 5, 12),
-      new THREE.MeshLambertMaterial({ color: i % 2 ? 0xe63946 : 0xffffff }),
-    );
-    seg.position.set(lx, 6 + i * 5, lz);
-    seg.castShadow = true;
-    group.add(seg);
-  }
+  // The lighthouse on the point: white tower, red top, rotating beam.
+  const lh = layout.landmarks.lighthouse;
+  const tower = new THREE.Mesh(cylGeo, lambert(0xf5f2e8));
+  tower.scale.set(5, 34, 5);
+  tower.position.set(lh.x, 17, lh.z);
+  scene.add(tower);
+  const top = new THREE.Mesh(cylGeo, lambert(0xc0392b));
+  top.scale.set(5.6, 4, 5.6);
+  top.position.set(lh.x, 35, lh.z);
+  scene.add(top);
   const lamp = new THREE.Mesh(
-    new THREE.SphereGeometry(2, 12, 10),
-    new THREE.MeshBasicMaterial({ color: 0xfff2a0 }),
+    new THREE.SphereGeometry(2.4, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0xfff2b0 }),
   );
-  lamp.position.set(lx, 32, lz);
-  group.add(lamp);
+  lamp.position.set(lh.x, 38, lh.z);
+  scene.add(lamp);
+  const beam = new THREE.Group();
+  const beamMesh = new THREE.Mesh(
+    new THREE.ConeGeometry(6, 60, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff2b0, transparent: true, opacity: 0.18, side: THREE.DoubleSide,
+    }),
+  );
+  beamMesh.rotation.z = Math.PI / 2;
+  beamMesh.position.x = 30;
+  beam.add(beamMesh);
+  beam.position.set(lh.x, 38, lh.z);
+  scene.add(beam);
+  animated.beacon = beam;
+  addCollider(lh.x, lh.z, 7, 7);
 
-  // Marina boats, bobbing in the lagoon.
-  const boats = [];
-  for (let i = 0; i < 7; i++) {
-    const boat = new THREE.Group();
-    const hull = new THREE.Mesh(
-      new THREE.BoxGeometry(4, 1.6, 12),
-      new THREE.MeshLambertMaterial({ color: [0xffffff, 0xffd23e, 0x3ec6ff][i % 3] }),
-    );
-    hull.position.y = 0.4;
-    boat.add(hull);
-    const mast = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.15, 0.15, 8, 6),
-      new THREE.MeshLambertMaterial({ color: 0x8a6a4a }),
-    );
-    mast.position.y = 4.5;
-    boat.add(mast);
-    boat.position.set(-175 - rng() * 45, 0.4, 55 + i * 14);
-    boat.rotation.y = rng() * 0.6;
-    group.add(boat);
-    boats.push(boat);
+  // Garage del Sol: the player's home base, a big yellow workshop.
+  const g = layout.landmarks.garage;
+  box(g.x, 5, g.z, 30, 10, 20, lambert(0xf2a541));
+  box(g.x, 10.6, g.z, 32, 1.2, 22, lambert(0x8a4b3a));
+  addCollider(g.x, g.z, 16, 11);
+
+  // Hotel Brisa, Mercado Verde, Casa Azul, Villa Miramar, the Sharks' den.
+  const named = [
+    [layout.landmarks.hotel, 0xe8dcc8, 26, 22, 16],
+    [layout.landmarks.market, 0xd9a05b, 24, 10, 18],
+    [layout.landmarks.canalHouse, 0x4fa8a0, 14, 9, 12],
+    [layout.landmarks.villa, 0xfff1e0, 20, 10, 16],
+    [layout.landmarks.sharksDen, 0x5a5a66, 22, 12, 16],
+  ];
+  for (const [lm, color, w, h, d] of named) {
+    box(lm.x, h / 2, lm.z, w, h, d, lambert(color));
+    addCollider(lm.x, lm.z, w / 2 + 1, d / 2 + 1);
   }
 
-  // Palm trees along the boardwalk, the causeway edge and the roads.
-  function palmAt(x, z) {
-    const palm = new THREE.Group();
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.35, 0.55, 7, 7),
-      new THREE.MeshLambertMaterial({ color: 0x8a6a4a }),
+  // Palms along the roads and the boardwalk.
+  const trunkMat = lambert(0x7a5a38);
+  const leafMat = lambert(0x3f8f4f);
+  for (let i = 0; i < 44; i++) {
+    const onBoardwalk = i % 2 === 0;
+    const x = onBoardwalk ? 296 + rng.range(-3, 3) : rng.range(-240, 240);
+    const z = onBoardwalk ? rng.range(-270, 270) : rng.pick(layout.grid) + rng.range(-16, 16);
+    if (layout.isWater(x, z)) continue;
+    const trunk = new THREE.Mesh(cylGeo, trunkMat);
+    trunk.scale.set(0.35, 7, 0.35);
+    trunk.position.set(x, 3.5, z);
+    const leaves = new THREE.Mesh(
+      new THREE.ConeGeometry(3.2, 4.5, 7),
+      leafMat,
     );
-    trunk.position.y = 3.5;
-    trunk.rotation.z = (rng() - 0.5) * 0.15;
-    palm.add(trunk);
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const leaf = new THREE.Mesh(
-        new THREE.ConeGeometry(0.9, 4.5, 4),
-        new THREE.MeshLambertMaterial({ color: 0x2e9e5b }),
-      );
-      leaf.position.set(Math.cos(a) * 1.6, 7.2, Math.sin(a) * 1.6);
-      leaf.rotation.z = Math.cos(a) * 1.1;
-      leaf.rotation.x = -Math.sin(a) * 1.1;
-      palm.add(leaf);
-    }
-    palm.position.set(x, 0, z);
-    group.add(palm);
+    leaves.position.set(x, 8.4, z);
+    scene.add(trunk, leaves);
   }
-  for (let z = -200; z <= 200; z += 40) {
-    palmAt(-143, z);
-    palmAt(-158, z + 20);
-  }
-  for (const x of WORLD.roadsX) {
-    for (const z of [-150, -30, 90, 210]) palmAt(x + 9, z);
-  }
-  for (let i = 0; i < 10; i++) palmAt(-120 + rng() * 320, -240 + rng() * 20);
 
-  // Street lights on the main intersections, with glowing heads.
-  const lampPosts = [];
-  for (const x of WORLD.roadsX) {
-    for (const z of WORLD.roadsZ) {
-      if ((x + z) % 120 !== 0) continue;
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.18, 0.18, 7, 6),
-        new THREE.MeshLambertMaterial({ color: 0x2a2f33 }),
-      );
-      pole.position.set(x + 7, 3.5, z + 7);
-      group.add(pole);
+  // Street lamps along the main streets.
+  const lampMat = lambert(0x3a3a40);
+  for (const c of [-160, 0, 160]) {
+    for (let t = -200; t <= 200; t += 80) {
+      const pole = new THREE.Mesh(cylGeo, lampMat);
+      pole.scale.set(0.2, 6, 0.2);
+      pole.position.set(c + 7, 3, t);
       const head = new THREE.Mesh(
         new THREE.SphereGeometry(0.5, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0xffe9a0 }),
+        new THREE.MeshBasicMaterial({ color: 0xffe9a8 }),
       );
-      head.position.set(x + 7, 7.1, z + 7);
-      group.add(head);
-      lampPosts.push(head);
+      head.position.set(c + 7, 6.2, t);
+      scene.add(pole, head);
     }
   }
 
-  // Road graph: every intersection, for traffic and pedestrians.
-  const nodes = [];
-  for (const x of WORLD.roadsX) {
-    for (const z of WORLD.roadsZ) nodes.push({ x, z });
-  }
-  return { group, colliders, wheel, boats, lampPosts, nodes, water: null };
-}
-
-// Push a circle out of any building box it overlaps. The player, cars and
-// anything else that walks the streets uses this.
-export function collide(pos, radius, colliders) {
-  for (const c of colliders) {
-    const nx = Math.max(c.x0, Math.min(pos.x, c.x1));
-    const nz = Math.max(c.z0, Math.min(pos.z, c.z1));
-    const dx = pos.x - nx;
-    const dz = pos.z - nz;
-    const d2 = dx * dx + dz * dz;
-    if (d2 >= radius * radius) continue;
-    if (d2 > 0.0001) {
-      const d = Math.sqrt(d2);
-      pos.x = nx + (dx / d) * radius;
-      pos.z = nz + (dz / d) * radius;
-    } else {
-      pos.x = c.x1 + radius;
+  function update(dt, t) {
+    if (animated.wheel) animated.wheel.rotation.z = t * 0.12;
+    if (animated.beacon) animated.beacon.rotation.y = t * 0.5;
+    if (animated.water) {
+      animated.water.material.opacity = 0.88 + Math.sin(t * 0.6) * 0.04;
+    }
+    for (let i = 0; i < animated.boats.length; i++) {
+      animated.boats[i].position.y = 0.6 + Math.sin(t * 0.8 + i) * 0.25;
+      animated.boats[i].rotation.z = Math.sin(t * 0.5 + i * 2) * 0.03;
     }
   }
-  return pos;
-}
 
-// Height of the raised decks under a point: 1.2 on the causeway and pier,
-// 0 everywhere else.
-export function deckHeight(x, z) {
-  if (x < WORLD.lagoonX && Math.abs(z) < 9 && x >= -262) return 1.2;
-  return 0;
-}
-
-// Is this point on walkable land? The causeway, the pier and the lighthouse
-// rock count as land; open lagoon water does not.
-export function onLand(x, z) {
-  if (x >= WORLD.lagoonX) return true;
-  if (Math.abs(z) < 8 && x >= -262) return true;
-  const dx = x - WORLD.lighthouse.x;
-  const dz = z - WORLD.lighthouse.z;
-  return dx * dx + dz * dz < 20 * 20;
-}
-
-export function clampToLand(pos, radius) {
-  if (!onLand(pos.x, pos.z)) {
-    if (Math.abs(pos.z) < 30) {
-      pos.z = Math.max(-7 + radius, Math.min(7 - radius, pos.z));
-    } else {
-      pos.x = Math.max(WORLD.lagoonX + radius, pos.x);
-    }
-  }
-  pos.x = Math.max(-258, Math.min(258, pos.x));
-  pos.z = Math.max(-258, Math.min(258, pos.z));
-  return pos;
+  return { colliders, update, placed };
 }

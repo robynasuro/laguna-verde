@@ -1,75 +1,82 @@
-// Keyboard and mouse input. One job: remember which keys are down and turn
-// drags into camera yaw and pitch. Nothing here knows what the keys do.
-const DRAG_YAW = 0.005;
-const DRAG_PITCH = 0.004;
-const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+// Keyboard and mouse. One job: turn raw DOM events into a clean
+// per-frame input state — held keys, pressed-this-frame edges — so
+// the game logic never touches an event listener directly.
 
-export function createInput(canvas) {
-  const keys = {};
-  const input = {
-    keys,
-    yaw: 0.6,
-    pitch: 0.32,
-    dragging: false,
-    clicked: false,
-    lastX: 0,
-    lastY: 0,
-  };
+import { KEYS } from './config.js';
 
-  function clearKeys() {
-    for (const code of Object.keys(keys)) keys[code] = false;
+export class Input {
+  constructor() {
+    this.held = new Set();
+    this.pressed = new Set();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.anyKey = false;
+    this.enabled = true;
+    this.onKeyDown = (e) => {
+      if (!this.enabled) return;
+      if (e.code === 'Space') e.preventDefault();
+      if (!e.repeat) {
+        this.pressed.add(e.code);
+        this.anyKey = true;
+      }
+      this.held.add(e.code);
+    };
+    this.onKeyUp = (e) => {
+      this.held.delete(e.code);
+    };
+    this.onMouseMove = (e) => {
+      this.mouseDX += e.movementX || 0;
+      this.mouseDY += e.movementY || 0;
+    };
+    this.onBlur = () => {
+      this.held.clear();
+      this.pressed.clear();
+    };
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('mousemove', this.onMouseMove);
+    window.addEventListener('blur', this.onBlur);
   }
 
-  function dragBy(dx, dy) {
-    input.yaw -= dx * DRAG_YAW;
-    input.pitch = Math.max(-0.1, Math.min(0.9, input.pitch + dy * DRAG_PITCH));
+  isDown(codes) {
+    for (const c of codes) if (this.held.has(c)) return true;
+    return false;
   }
 
-  function pointerDown(x, y) {
-    input.dragging = true;
-    input.clicked = true;
-    input.lastX = x;
-    input.lastY = y;
+  wasPressed(codes) {
+    for (const c of codes) if (this.pressed.has(c)) return true;
+    return false;
   }
 
-  function pointerMove(x, y) {
-    if (!input.dragging) return;
-    dragBy(x - input.lastX, y - input.lastY);
-    input.lastX = x;
-    input.lastY = y;
+  get forward() { return this.isDown(KEYS.forward); }
+  get back() { return this.isDown(KEYS.back); }
+  get left() { return this.isDown(KEYS.left); }
+  get right() { return this.isDown(KEYS.right); }
+  get brake() { return this.isDown(KEYS.brake); }
+  get enterCar() { return this.wasPressed(KEYS.enterCar); }
+  get shoot() { return this.wasPressed(KEYS.shoot); }
+  get garage() { return this.wasPressed(KEYS.garage); }
+  get radio() { return this.wasPressed(KEYS.radio); }
+  get pause() { return this.wasPressed(KEYS.pause); }
+  get timeOfDay() { return this.wasPressed(KEYS.timeOfDay); }
+  get mute() { return this.wasPressed(KEYS.mute); }
+  get mission() { return this.wasPressed(KEYS.mission); }
+
+  // Call once at the end of each frame: edges live for one frame only.
+  endFrame() {
+    this.pressed.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.anyKey = false;
   }
 
-  addEventListener('keydown', (e) => {
-    keys[e.code] = true;
-    // Stop the page scrolling when the game uses these keys.
-    if (SCROLL_KEYS.has(e.code)) e.preventDefault();
-  });
-  addEventListener('keyup', (e) => { keys[e.code] = false; });
-  // Losing focus must never leave a key stuck down.
-  addEventListener('blur', clearKeys);
-
-  canvas.addEventListener('mousedown', (e) => pointerDown(e.clientX, e.clientY));
-  addEventListener('mouseup', () => { input.dragging = false; });
-  addEventListener('mousemove', (e) => pointerMove(e.clientX, e.clientY));
-
-  canvas.addEventListener('touchstart', (e) => {
-    pointerDown(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: true });
-  canvas.addEventListener('touchmove', (e) => {
-    if (!input.dragging) return;
-    dragBy(
-      (e.touches[0].clientX - input.lastX) * 1.2,
-      (e.touches[0].clientY - input.lastY) * 1.25,
-    );
-    input.lastX = e.touches[0].clientX;
-    input.lastY = e.touches[0].clientY;
-  }, { passive: true });
-  canvas.addEventListener('touchend', () => { input.dragging = false; });
-
-  return input;
-}
-
-// True when any of the given key codes is currently held down.
-export function pressed(input, ...codes) {
-  return codes.some((code) => input.keys[code]);
+  // Feed a key from outside (tests, shots, touch): same as a real press.
+  simulate(code, down) {
+    if (down) {
+      this.held.add(code);
+      this.pressed.add(code);
+    } else {
+      this.held.delete(code);
+    }
+  }
 }
