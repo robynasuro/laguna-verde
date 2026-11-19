@@ -6,7 +6,7 @@
 
 Built for the [Make GTA 6](https://make.fun/bounty/gta6-01) bounty on make.fun.
 
-I built this one because I wanted a crime game with a reason to drive, not just a map to drive around. Carmen is a mechanic. Her little brother Tomas owes $50,000 to a crew called Los Tiburones after wrecking their car, and she is the one paying it off, one job at a time, in a lagoon city at golden hour.
+I built this one because I wanted a crime game with a reason to drive, not just a map to drive around. Carmen is a mechanic. Her little brother Tomas owes $50,000 to a crew called Los Tiburones after wrecking their car, and she is the one paying it off, one job at a time, in a lagoon city at golden hour. I wrote every line of it myself, in one recorded session, for the third round of this entry.
 
 ## What is in the game
 

@@ -1,5 +1,5 @@
-// Input for Laguna Verde. One job: remember which keys are down and turn
-// mouse drags (and touch drags) into camera yaw and pitch.
+// Keyboard and mouse input. One job: remember which keys are down and turn
+// drags into camera yaw and pitch. Nothing here knows what the keys do.
 export function createInput(canvas) {
   const keys = {};
   const input = {
@@ -8,22 +8,23 @@ export function createInput(canvas) {
     pitch: 0.32,
     dragging: false,
     clicked: false,
-    mouseDX: 0,
-    mouseDY: 0,
     lastX: 0,
     lastY: 0,
   };
 
   addEventListener('keydown', (e) => {
     keys[e.code] = true;
-    // Keep the page from scrolling when the game uses these keys.
-    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+    // Stop the page scrolling when the game uses these keys.
+    if (
+      e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' ||
+      e.code === 'ArrowLeft' || e.code === 'ArrowRight'
+    ) {
       e.preventDefault();
     }
   });
   addEventListener('keyup', (e) => { keys[e.code] = false; });
   addEventListener('blur', () => {
-    // Losing focus must not leave a key stuck down.
+    // Losing focus must never leave a key stuck down.
     for (const code of Object.keys(keys)) keys[code] = false;
   });
 
@@ -53,7 +54,10 @@ export function createInput(canvas) {
   }, { passive: true });
   canvas.addEventListener('touchmove', (e) => {
     if (!input.dragging) return;
-    dragBy((e.touches[0].clientX - input.lastX) * 1.2, (e.touches[0].clientY - input.lastY) * 1.25);
+    dragBy(
+      (e.touches[0].clientX - input.lastX) * 1.2,
+      (e.touches[0].clientY - input.lastY) * 1.25,
+    );
     input.lastX = e.touches[0].clientX;
     input.lastY = e.touches[0].clientY;
   }, { passive: true });

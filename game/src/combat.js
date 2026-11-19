@@ -1,5 +1,5 @@
-// Combat: the pistol, rival crew enemies, shooting and getting shot.
-// One job: fighting on foot.
+// Combat: the pistol, rival crew enemies, shooting and getting shot. One
+// job: fighting on foot.
 import * as THREE from '../vendor/three.module.min.js';
 
 export function createCombat(scene, rng) {

@@ -1,5 +1,5 @@
-// Pedestrians: people walking the sidewalks, who run when scared.
-// One job: make the sidewalks feel lived in.
+// Pedestrians: people walking the sidewalks, who run when something fast
+// or loud comes at them. One job: make the sidewalks feel lived in.
 import * as THREE from '../vendor/three.module.min.js';
 
 const SHIRTS = [0xff8fa3, 0x8ecae6, 0xffd23e, 0x90be6d, 0xf28b82, 0xbdb2ff, 0xffffff, 0xff9f2e];

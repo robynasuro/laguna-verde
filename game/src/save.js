@@ -1,5 +1,5 @@
 // Save and load for Laguna Verde. One job: keep career progress in
-// localStorage so Carmen can pick up where she left off.
+// localStorage so Carmen can pick up where she left off, session after session.
 const KEY = 'laguna-verde-save-v1';
 
 export function saveGame(G) {

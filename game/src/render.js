@@ -1,13 +1,12 @@
-// Three.js scene, golden-hour lighting, sky and the chase camera.
-// One job: own the renderer and the camera. Nothing about gameplay rules.
+// Renderer, lights, sky and the chase camera. One job: own the Three.js
+// scene and put the camera where it belongs. No gameplay rules live here.
 import * as THREE from '../vendor/three.module.min.js';
 
 export function createRender(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  // ?noshadow=1 turns the shadow pass off. The automated playtest runs under
-  // software rendering, where shadows are slow; the shipped game always has
-  // shadows on.
+  // ?noshadow=1 switches the shadow pass off. Headless playtests run under
+  // software rendering where shadows are slow; the shipped game keeps them.
   renderer.shadowMap.enabled = !new URLSearchParams(location.search).has('noshadow');
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -16,6 +15,7 @@ export function createRender(canvas) {
   scene.fog = new THREE.Fog(0xffc98a, 220, 620);
   const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
 
+  // Low golden sun from the west, so the lagoon side catches the light.
   const sun = new THREE.DirectionalLight(0xffd9a0, 2.2);
   sun.position.set(-180, 120, -80);
   sun.castShadow = true;
@@ -27,10 +27,12 @@ export function createRender(canvas) {
   sun.shadow.camera.far = 700;
   scene.add(sun);
   scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x8a6a4a, 0.9));
-  const dusk = new THREE.PointLight(0xff9f2e, 0, 120);
-  dusk.position.set(-195, 30, 0);
-  scene.add(dusk);
+  // Warm point light over the pier that only matters at dusk.
+  const pierGlow = new THREE.PointLight(0xff9f2e, 0, 120);
+  pierGlow.position.set(-195, 30, 0);
+  scene.add(pierGlow);
 
+  // Smoothed camera state, so the view eases instead of snapping.
   const cam = {
     pos: new THREE.Vector3(0, 10, 20),
     look: new THREE.Vector3(),
@@ -48,32 +50,32 @@ export function createRender(canvas) {
   addEventListener('resize', resize);
   resize();
 
-  // Time of day: 0 is noon, 1 is golden hour, 2 is dusk. It drives the sky,
-  // the sun colour and the pier lights.
+  // Time of day: 0 noon, 1 golden hour, 2 dusk. It sets the sky, the fog,
+  // the sun and the pier lights in one place.
   function setTimeOfDay(t) {
     if (t < 0.5) {
       scene.background.set(0x87ceeb);
       scene.fog.color.set(0x87ceeb);
       sun.intensity = 2.6;
       sun.color.set(0xfff2cc);
-      dusk.intensity = 0;
+      pierGlow.intensity = 0;
     } else if (t < 1.5) {
       scene.background.set(0xffc98a);
       scene.fog.color.set(0xffc98a);
       sun.intensity = 2.2;
       sun.color.set(0xffd9a0);
-      dusk.intensity = 0;
+      pierGlow.intensity = 0;
     } else {
       scene.background.set(0x2a3a5e);
       scene.fog.color.set(0x2a3a5e);
       sun.intensity = 0.7;
       sun.color.set(0xff9f6e);
-      dusk.intensity = 1.6;
+      pierGlow.intensity = 1.6;
     }
   }
 
-  // Chase camera: ease toward a point behind the target and look slightly
-  // above it, so turns feel smooth instead of snapping.
+  // Chase camera: ease toward a point behind the target, look a little
+  // above it. Turns feel smooth because the camera lags the heading.
   function updateCamera(target, yaw, pitch, dist, dt) {
     const desired = new THREE.Vector3(
       target.x - Math.sin(yaw) * Math.cos(pitch) * dist,

@@ -1,6 +1,6 @@
 // Procedural sound for Laguna Verde: engine hum, three radio stations,
-// sirens, gunshots, cash. No audio files anywhere, everything is synthesized
-// with WebAudio so the game stays offline and self contained.
+// sirens, gunshots, cash. No audio files anywhere. Everything is synthesized
+// live with WebAudio so the game stays offline and self contained.
 const STATIONS = [
   { name: 'LAGUNA FM 101.2', desc: 'Sunset pop', root: 220, scale: [0, 3, 5, 7, 10] },
   { name: 'TIBURON ROCK 94.7', desc: 'Garage rock', root: 110, scale: [0, 2, 3, 5, 7, 10] },

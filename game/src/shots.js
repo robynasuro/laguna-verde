@@ -1,6 +1,6 @@
-// Screenshot scenes. Each one stages the real game (real city, real cars,
-// real HUD) into a fixed frame, so a screenshot is a render of the game
-// itself, not a mockup. Used with ?shot=cover|drive|mission|city.
+// Screenshot scenes. Each one stages the real game (the real city, real
+// cars, real HUD) into a fixed frame, so a screenshot is a render of the
+// game itself, not a mockup. Used with ?shot=cover|drive|mission|city.
 import * as THREE from '../vendor/three.module.min.js';
 
 export function stageShot(name, G, sys) {
@@ -24,7 +24,7 @@ export function stageShot(name, G, sys) {
     car.mesh.position.set(-205, 1.2, 0);
     car.mesh.rotation.y = car.heading;
     sys.enterCar(car);
-    setCam(-235, 46, -22, -172, 0, 3);
+    setCam(-228, 16, -18, -182, 1, 2);
     hud.setObjective('First Fare. Pick up Mrs. Alvarez at the corner of 2nd and Coral.');
     G.marker = { x: 0, z: 60 };
     ctx.setMarker(G.marker);
@@ -50,15 +50,16 @@ export function stageShot(name, G, sys) {
     police.spawnCar({ x: 0, z: -40 });
     police.spawnCar({ x: 0, z: -40 });
     for (const pc of police.cars) {
-      pc.pos.set(-8, 0, -70);
-      pc.heading = 0;
+      pc.pos.set(7, 0, -16);
+      pc.heading = Math.PI;
       pc.speed = 26;
     }
+    police.cars[1].pos.set(-7, 0, -6);
     police.spawnHeli();
     police.heli.pos.set(14, 44, -18);
     hud.setObjective('The Getaway. Lose the police. Stay out of sight for 40 seconds.');
     hud.flash('WANTED: 3 stars. Air-1 is overhead.');
-    setCam(-16, 8, -72, 0, 2, -30);
+    setCam(-13, 9, -60, 0, 1, -32);
   } else if (name === 'mission') {
     // On foot at the garage, rivals closing in, dialogue up, marker on the minimap.
     G.timeOfDay = 1;

@@ -1,10 +1,10 @@
-// Traffic: AI cars that drive the road grid in loops and stop for the car ahead.
-// One job: keep the streets busy and believable.
+// Traffic: AI cars that drive the road grid in loops and stop for the car
+// ahead. One job: keep the streets busy and believable.
 import { makeCar, CAR_DEFS } from './cars.js';
 
 export function createTraffic(scene, nodes, rng) {
   const cars = [];
-  // Each loop is a rectangle around a pair of roads. Six loops cover the grid.
+  // Six rectangular loops around pairs of roads, covering the whole grid.
   const loops = [];
   for (let i = 0; i < 6; i++) {
     const x1 = [-120, -60, 0, 60, 120][i % 5];
@@ -21,8 +21,8 @@ export function createTraffic(scene, nodes, rng) {
   for (let i = 0; i < 14; i++) {
     const def = CAR_DEFS[Math.floor(rng() * CAR_DEFS.length)];
     const loop = loops[i % loops.length];
-    const wp = loop[i % 4];
-    const car = makeCar(scene, def, wp.x, wp.z, 0, false);
+    const start = loop[i % 4];
+    const car = makeCar(scene, def, start.x, start.z, 0, false);
     car.loop = loop;
     car.wp = (i % 4 + 1) % 4;
     car.cruise = 7 + rng() * 4;
@@ -30,7 +30,7 @@ export function createTraffic(scene, nodes, rng) {
   }
 
   function update(dt, playerCar, policeCars) {
-    // Traffic stops for anything in front of it, including the player.
+    // Traffic stops for anything in front of it, player included.
     const all = [...cars, ...(playerCar ? [playerCar] : []), ...policeCars];
     for (const car of cars) {
       const target = car.loop[car.wp];
@@ -46,7 +46,7 @@ export function createTraffic(scene, nodes, rng) {
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
       car.heading += Math.max(-2.2 * dt, Math.min(2.2 * dt, diff * 2));
-      // Stop for the car ahead: check the wedge in front of the nose.
+      // Check the wedge in front of the nose for a car to stop behind.
       let blocked = false;
       for (const o of all) {
         if (o === car) continue;

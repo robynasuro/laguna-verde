@@ -103,7 +103,20 @@ export const MISSIONS = [
 ];
 
 export function createMissionEngine() {
-  const M = { active: null, stepIdx: 0, timer: 0, cpIdx: 0, startedAt: 0 };
+  const M = { active: null, stepIdx: 0, timer: 0, cpIdx: 0 };
+
+  // Where the beacon should point for a given step. Races point at the
+  // next checkpoint, everything else at its fixed spot.
+  function targetOf(mission, stepIdx) {
+    const s = mission.steps[stepIdx];
+    if (!s) return null;
+    if (s.type === 'race') return { x: s.points[M.cpIdx][0], z: s.points[M.cpIdx][1] };
+    return { x: s.x, z: s.z };
+  }
+
+  function currentTarget() {
+    return M.active ? targetOf(M.active, M.stepIdx) : null;
+  }
 
   function start(mission, ctx) {
     M.active = mission;
@@ -117,17 +130,7 @@ export function createMissionEngine() {
     ctx.setMarker(targetOf(mission, 0));
   }
 
-  function targetOf(mission, stepIdx) {
-    const s = mission.steps[stepIdx];
-    if (!s) return null;
-    if (s.type === 'race') return { x: s.points[M.cpIdx][0], z: s.points[M.cpIdx][1] };
-    return { x: s.x, z: s.z };
-  }
-
-  function currentTarget() {
-    return M.active ? targetOf(M.active, M.stepIdx) : null;
-  }
-
+  // Move to the next step, or finish the mission when the steps run out.
   function advance(ctx) {
     const mission = M.active;
     M.stepIdx += 1;
@@ -156,8 +159,21 @@ export function createMissionEngine() {
     M.stepIdx = 0;
     M.timer = 0;
     M.cpIdx = 0;
-    ctx.setObjective('Debt paid: $' + ctx.debtPaid.toLocaleString() + ' of $50,000. Visit the next mission marker when you are ready.');
+    ctx.setObjective(
+      'Debt paid: $' + ctx.debtPaid.toLocaleString() +
+      ' of $50,000. Visit the next mission marker when you are ready.',
+    );
     ctx.setMarker(null);
+  }
+
+  function fail(ctx, reason) {
+    const mission = M.active;
+    M.active = null;
+    M.stepIdx = 0;
+    M.timer = 0;
+    M.cpIdx = 0;
+    ctx.setMarker(null);
+    ctx.onFail(mission, reason);
   }
 
   function update(dt, ctx) {
@@ -165,22 +181,20 @@ export function createMissionEngine() {
     const mission = M.active;
     const s = mission.steps[M.stepIdx];
     const p = ctx.playerPos();
+
     if (s.type === 'goto') {
-      const d = Math.hypot(p.x - s.x, p.z - s.z);
-      if (d < 7) {
-        // Mission 2: picking the package up triggers the ambush.
-        if (M.stepIdx === 0 && mission.ambushAt === 0) {
-          ctx.setWanted(mission.wantedOnPickup || 0);
-          ctx.spawnRivals(p.x + 12, p.z + 8, mission.rivals || 0);
-          ctx.say('Rico', 'Sharks. Right on time. Do not let them take the package.');
-        }
-        advance(ctx);
+      if (Math.hypot(p.x - s.x, p.z - s.z) >= 7) return;
+      // Mission 2: grabbing the package triggers the ambush.
+      if (M.stepIdx === 0 && mission.ambushAt === 0) {
+        ctx.setWanted(mission.wantedOnPickup || 0);
+        ctx.spawnRivals(p.x + 12, p.z + 8, mission.rivals || 0);
+        ctx.say('Rico', 'Sharks. Right on time. Do not let them take the package.');
       }
+      advance(ctx);
     } else if (s.type === 'race') {
       M.timer += dt;
       const pt = s.points[M.cpIdx];
-      const d = Math.hypot(p.x - pt[0], p.z - pt[1]);
-      if (d < 10) {
+      if (Math.hypot(p.x - pt[0], p.z - pt[1]) < 10) {
         M.cpIdx += 1;
         if (M.cpIdx >= s.points.length) {
           advance(ctx);
@@ -202,16 +216,6 @@ export function createMissionEngine() {
     } else if (s.type === 'defend') {
       if (ctx.rivalsLeft() === 0) advance(ctx);
     }
-  }
-
-  function fail(ctx, reason) {
-    const mission = M.active;
-    M.active = null;
-    M.stepIdx = 0;
-    M.timer = 0;
-    M.cpIdx = 0;
-    ctx.setMarker(null);
-    ctx.onFail(mission, reason);
   }
 
   return { M, start, update, complete, fail, currentTarget, targetOf };

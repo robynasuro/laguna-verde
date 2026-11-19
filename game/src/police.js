@@ -1,6 +1,6 @@
-// Wanted level and police: patrol cars that chase, ram and bust; a helicopter
-// at 3 stars and up; wanted that cools off when you stay out of sight.
-// One job: the heat.
+// Wanted level and police: patrol cars that chase, ram and bust; a
+// helicopter at 3 stars and up; wanted that cools off when you stay out of
+// sight. One job: the heat.
 import * as THREE from '../vendor/three.module.min.js';
 import { makeCar } from './cars.js';
 
@@ -20,7 +20,12 @@ export function createPolice(scene, rng) {
     const a = rng() * Math.PI * 2;
     const x = near.x + Math.cos(a) * 70;
     const z = near.z + Math.sin(a) * 70;
-    const car = makeCar(scene, policeDef, Math.max(-240, Math.min(240, x)), Math.max(-240, Math.min(240, z)), 0, true);
+    const car = makeCar(
+      scene, policeDef,
+      Math.max(-240, Math.min(240, x)),
+      Math.max(-240, Math.min(240, z)),
+      0, true,
+    );
     car.cruise = 30;
     P.cars.push(car);
     return car;
@@ -103,7 +108,7 @@ export function createPolice(scene, rng) {
         playerCar.pos.z += Math.cos(car.heading) * 3 * dt * 10;
         playerCar.hp = Math.max(0, (playerCar.hp || 100) - 8 * dt);
       }
-      // A patrol car on top of Carmen on foot starts the bust clock.
+      // A patrol car sitting on Carmen on foot starts the bust clock.
       if (onFoot && dist < 3) P.bustTimer += dt;
       else P.bustTimer = Math.max(0, P.bustTimer - dt);
     }

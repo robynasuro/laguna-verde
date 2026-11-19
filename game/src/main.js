@@ -29,7 +29,7 @@ const police = createPolice(scene, rng);
 const combat = createCombat(scene, rng);
 const missions = createMissionEngine();
 
-// Carmen on foot: orange jacket, dark hair.
+// ---- Carmen on foot: orange jacket, dark hair. ----
 const playerMesh = new THREE.Group();
 {
   const jacket = new THREE.MeshLambertMaterial({ color: 0xff9f2e });
@@ -51,17 +51,18 @@ const playerMesh = new THREE.Group();
   hair.scale.set(1, 0.8, 1);
   playerMesh.add(hair);
   const legMat = new THREE.MeshLambertMaterial({ color: 0x2a3f5f });
-  const l1 = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.6, 0.17), legMat);
-  l1.position.set(-0.15, 0.3, 0);
-  playerMesh.add(l1);
-  const l2 = l1.clone();
-  l2.position.x = 0.15;
-  playerMesh.add(l2);
-  playerMesh.userData.legs = [l1, l2];
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.6, 0.17), legMat);
+  legL.position.set(-0.15, 0.3, 0);
+  playerMesh.add(legL);
+  const legR = legL.clone();
+  legR.position.x = 0.15;
+  playerMesh.add(legR);
+  playerMesh.userData.legs = [legL, legR];
 }
 playerMesh.position.set(WORLD.garage.x + 4, 0, WORLD.garage.z + 12);
 scene.add(playerMesh);
 
+// ---- The game state, one object the whole loop reads. ----
 const G = {
   state: 'menu', // menu | playing | paused | garage | over
   money: 400,
@@ -85,7 +86,7 @@ const G = {
 };
 G.player = { pos: playerMesh.position };
 
-// The starter car outside the garage, plus a few parked cars around town.
+// ---- Parked cars: the starter car outside the garage, plus a few around town. ----
 const parked = [];
 function parkCar(defIdx, x, z, heading) {
   const car = makeCar(scene, CAR_DEFS[defIdx], x, z, heading, false);
@@ -102,10 +103,10 @@ parkCar(1, 182, -58, Math.PI);
 parkCar(2, -118, -118, Math.PI / 2);
 G.parked = parked;
 
-// The next mission always starts at the garage.
 function nextMission() {
   return MISSIONS[G.missionsDone] || null;
 }
+
 function refreshMarker() {
   if (missions.M.active) return;
   const nm = nextMission();
@@ -117,7 +118,7 @@ function refreshMarker() {
   }
 }
 
-// The yellow beacon that marks where to go next.
+// ---- The yellow beacon that marks where to go next. ----
 const beacon = new THREE.Mesh(
   new THREE.CylinderGeometry(1.6, 1.6, 14, 12, 1, true),
   new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
@@ -132,7 +133,7 @@ beaconBase.rotation.x = Math.PI / 2;
 beaconBase.position.set(WORLD.garageFront.x, 0.3, WORLD.garageFront.z);
 scene.add(beaconBase);
 
-// Dust and impact particles: a small reusable pool.
+// ---- Dust and impact particles: a small reusable pool. ----
 const particles = [];
 for (let i = 0; i < 14; i++) {
   const m = new THREE.Mesh(
@@ -151,7 +152,7 @@ function puff(x, z, color) {
   p.life = 0.6;
 }
 
-// The context missions use to talk to the rest of the game.
+// ---- The context missions use to talk to the rest of the game. ----
 const ctx = {
   playerPos: () => G.playerPos(),
   say: (who, text) => hud.say(who, text),
@@ -360,11 +361,11 @@ function enterCar(car) {
 function exitCar() {
   if (!G.car) return;
   const car = G.car;
-  const side = {
-    x: car.pos.x + Math.cos(car.heading) * 3,
-    z: car.pos.z - Math.sin(car.heading) * 3,
-  };
-  playerMesh.position.set(side.x, 0, side.z);
+  playerMesh.position.set(
+    car.pos.x + Math.cos(car.heading) * 3,
+    0,
+    car.pos.z - Math.sin(car.heading) * 3,
+  );
   playerMesh.visible = true;
   car.speed = 0;
   car.parked = true;
@@ -393,13 +394,13 @@ function tryShoot() {
 
 // ---- Main loop ----
 let last = performance.now();
-let ePressed = false;
-let fPressed = false;
-let gPressed = false;
-let rPressed = false;
-let pPressed = false;
-let mPressed = false;
-let tPressed = false;
+let eWasDown = false;
+let fWasDown = false;
+let gWasDown = false;
+let rWasDown = false;
+let pWasDown = false;
+let mWasDown = false;
+let tWasDown = false;
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -440,41 +441,41 @@ function frame(now) {
 
   // One-shot keys: fire once per press, not once per frame.
   const edge = (code, wasDown) => !!input.keys[code] && !wasDown;
-  if (edge('KeyE', ePressed)) {
+  if (edge('KeyE', eWasDown)) {
     if (G.inCar) exitCar();
     else {
       const c = nearestCar(4.5);
       if (c) enterCar(c);
     }
   }
-  ePressed = !!input.keys['KeyE'];
-  if (edge('KeyF', fPressed)) tryShoot();
-  fPressed = !!input.keys['KeyF'];
+  eWasDown = !!input.keys['KeyE'];
+  if (edge('KeyF', fWasDown)) tryShoot();
+  fWasDown = !!input.keys['KeyF'];
   input.clicked = false;
-  if (edge('KeyG', gPressed)) {
+  if (edge('KeyG', gWasDown)) {
     const d = Math.hypot(playerMesh.position.x - WORLD.garageFront.x, playerMesh.position.z - WORLD.garageFront.z);
     if (d < 14 && !G.inCar) openGarage();
   }
-  gPressed = !!input.keys['KeyG'];
-  if (edge('KeyR', rPressed)) {
+  gWasDown = !!input.keys['KeyG'];
+  if (edge('KeyR', rWasDown)) {
     const st = audio.cycleStation();
     hud.toast('Radio: ' + st.name);
   }
-  rPressed = !!input.keys['KeyR'];
-  if (edge('KeyP', pPressed) || edge('Escape', pPressed)) {
+  rWasDown = !!input.keys['KeyR'];
+  if (edge('KeyP', pWasDown) || edge('Escape', pWasDown)) {
     G.state = 'paused';
     $('pause-stats').textContent = 'Money $' + G.money.toLocaleString() + ' - debt paid $' + G.debtPaid.toLocaleString() + ' of $50,000 - jobs done ' + G.missionsDone + ' of 7 - wanted ' + police.wanted + ' stars.';
     showScreen('pause');
   }
-  pPressed = !!input.keys['KeyP'] || !!input.keys['Escape'];
-  if (edge('KeyM', mPressed)) hud.toast(audio.toggleMute() ? 'Sound off' : 'Sound on');
-  mPressed = !!input.keys['KeyM'];
-  if (edge('KeyT', tPressed)) {
+  pWasDown = !!input.keys['KeyP'] || !!input.keys['Escape'];
+  if (edge('KeyM', mWasDown)) hud.toast(audio.toggleMute() ? 'Sound off' : 'Sound on');
+  mWasDown = !!input.keys['KeyM'];
+  if (edge('KeyT', tWasDown)) {
     G.timeOfDay = (G.timeOfDay + 1) % 3;
     R.setTimeOfDay(G.timeOfDay);
     hud.toast(G.timeOfDay === 2 ? 'Dusk over the lagoon' : G.timeOfDay === 1 ? 'Golden hour' : 'Midday sun');
   }
-  tPressed = !!input.keys['KeyT'];
+  tWasDown = !!input.keys['KeyT'];
 
   // The camera yaw follows the mouse drag; while driving it trails the car.
   if (G.inCar) input.yaw += ((G.car.heading + Math.PI) - input.yaw) * Math.min(1, dt * 0.8);

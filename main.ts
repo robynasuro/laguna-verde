@@ -1,6 +1,6 @@
 // Laguna Verde: Carmen's Debt, a gta6-01 entry (Node 22, standard library
-// only). The game is this directory's game/ folder, plain static files a
-// desktop browser loads offline: game/index.html and its ES modules, Three.js
+// only). The game is this directory's game/ folder: plain static files a
+// desktop browser loads offline, game/index.html and its ES modules, Three.js
 // vendored under game/vendor/, no network request at runtime. This program
 // hands it in. It copies game/ and screenshots/ from beside this file to
 // /output and writes /output/dossier.json, the summary the judge reads,

@@ -1,6 +1,6 @@
-// HUD and minimap: health, money, debt meter, wanted stars, speed, objective,
-// dialogue box, messages, and the top-down minimap canvas.
-// One job: everything the player reads on screen.
+// HUD and minimap: health, money, debt meter, wanted stars, speed,
+// objective, dialogue box, messages, and the top-down minimap canvas. One
+// job: everything the player reads on screen.
 export function createHud() {
   const $ = (id) => document.getElementById(id);
   const el = {
@@ -74,8 +74,8 @@ export function createHud() {
     setTimeout(() => { el.toast.style.display = 'none'; }, 2200);
   }
 
-  // Minimap: lagoon blue, land sand, roads grey, player green, marker yellow,
-  // police blue, mission target yellow, garage orange.
+  // Minimap: lagoon blue, land sand, roads grey, player green, marker
+  // yellow, police blue, garage orange, Ferris wheel pink, lighthouse white.
   function drawMinimap(G) {
     const S = 190;
     const scale = S / 560;
