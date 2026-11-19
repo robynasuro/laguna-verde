@@ -29,40 +29,44 @@ const police = createPolice(scene, rng);
 const combat = createCombat(scene, rng);
 const missions = createMissionEngine();
 
-// ---- Carmen on foot: orange jacket, dark hair. ----
-const playerMesh = new THREE.Group();
-{
+// Carmen on foot: orange jacket, dark hair, jeans. Built once, moved by
+// the loop; the legs swing while she walks.
+function buildPlayerMesh() {
+  const mesh = new THREE.Group();
   const jacket = new THREE.MeshLambertMaterial({ color: 0xff9f2e });
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 1.05, 8), jacket);
   body.position.y = 1.0;
   body.castShadow = true;
-  playerMesh.add(body);
+  mesh.add(body);
   const head = new THREE.Mesh(
     new THREE.SphereGeometry(0.27, 10, 8),
     new THREE.MeshLambertMaterial({ color: 0xe8b98a }),
   );
   head.position.y = 1.8;
-  playerMesh.add(head);
+  mesh.add(head);
   const hair = new THREE.Mesh(
     new THREE.SphereGeometry(0.29, 10, 8),
     new THREE.MeshLambertMaterial({ color: 0x2a1a12 }),
   );
   hair.position.y = 1.88;
   hair.scale.set(1, 0.8, 1);
-  playerMesh.add(hair);
+  mesh.add(hair);
   const legMat = new THREE.MeshLambertMaterial({ color: 0x2a3f5f });
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.6, 0.17), legMat);
-  legL.position.set(-0.15, 0.3, 0);
-  playerMesh.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.15;
-  playerMesh.add(legR);
-  playerMesh.userData.legs = [legL, legR];
+  const legs = [];
+  for (const sx of [-0.15, 0.15]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.6, 0.17), legMat);
+    leg.position.set(sx, 0.3, 0);
+    mesh.add(leg);
+    legs.push(leg);
+  }
+  mesh.userData.legs = legs;
+  return mesh;
 }
+const playerMesh = buildPlayerMesh();
 playerMesh.position.set(WORLD.garage.x + 4, 0, WORLD.garage.z + 12);
 scene.add(playerMesh);
 
-// ---- The game state, one object the whole loop reads. ----
+// The game state, one object the whole loop reads.
 const G = {
   state: 'menu', // menu | playing | paused | garage | over
   money: 400,
@@ -86,7 +90,7 @@ const G = {
 };
 G.player = { pos: playerMesh.position };
 
-// ---- Parked cars: the starter car outside the garage, plus a few around town. ----
+// Parked cars: the starter car outside the garage, plus a few around town.
 const parked = [];
 function parkCar(defIdx, x, z, heading) {
   const car = makeCar(scene, CAR_DEFS[defIdx], x, z, heading, false);
@@ -118,31 +122,45 @@ function refreshMarker() {
   }
 }
 
-// ---- The yellow beacon that marks where to go next. ----
-const beacon = new THREE.Mesh(
-  new THREE.CylinderGeometry(1.6, 1.6, 14, 12, 1, true),
-  new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
-);
-beacon.position.set(WORLD.garageFront.x, 7, WORLD.garageFront.z);
-scene.add(beacon);
-const beaconBase = new THREE.Mesh(
-  new THREE.TorusGeometry(2.2, 0.3, 8, 24),
-  new THREE.MeshBasicMaterial({ color: 0xffd23e }),
-);
-beaconBase.rotation.x = Math.PI / 2;
-beaconBase.position.set(WORLD.garageFront.x, 0.3, WORLD.garageFront.z);
-scene.add(beaconBase);
-
-// ---- Dust and impact particles: a small reusable pool. ----
-const particles = [];
-for (let i = 0; i < 14; i++) {
-  const m = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4, 6, 5),
-    new THREE.MeshBasicMaterial({ color: 0xd8c9a0, transparent: true, opacity: 0 }),
+// The yellow beacon that marks where to go next.
+function buildBeacon() {
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.6, 1.6, 14, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
   );
-  scene.add(m);
-  particles.push({ mesh: m, life: 0 });
+  beam.position.set(WORLD.garageFront.x, 7, WORLD.garageFront.z);
+  scene.add(beam);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(2.2, 0.3, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffd23e }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(WORLD.garageFront.x, 0.3, WORLD.garageFront.z);
+  scene.add(ring);
+  return { beam, ring };
 }
+const beacon = buildBeacon();
+
+function moveBeacon(x, z) {
+  beacon.beam.position.set(x, 7, z);
+  beacon.ring.position.set(x, 0.3, z);
+}
+
+// Dust and impact particles: a small reusable pool.
+function buildParticles() {
+  const pool = [];
+  for (let i = 0; i < 14; i++) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 6, 5),
+      new THREE.MeshBasicMaterial({ color: 0xd8c9a0, transparent: true, opacity: 0 }),
+    );
+    scene.add(m);
+    pool.push({ mesh: m, life: 0 });
+  }
+  return pool;
+}
+const particles = buildParticles();
+
 function puff(x, z, color) {
   const p = particles.find((q) => q.life <= 0);
   if (!p) return;
@@ -152,17 +170,14 @@ function puff(x, z, color) {
   p.life = 0.6;
 }
 
-// ---- The context missions use to talk to the rest of the game. ----
+// The context missions use to talk to the rest of the game.
 const ctx = {
   playerPos: () => G.playerPos(),
   say: (who, text) => hud.say(who, text),
   setObjective: (t) => hud.setObjective(t),
   setMarker: (m) => {
     G.marker = m;
-    if (m) {
-      beacon.position.set(m.x, 7, m.z);
-      beaconBase.position.set(m.x, 0.3, m.z);
-    }
+    if (m) moveBeacon(m.x, m.z);
   },
   setWanted: (n) => {
     G.wanted = n;
@@ -197,15 +212,15 @@ const ctx = {
   ),
 };
 
-// ---- Menus, garage, save, end screens ----
+// Menus, garage, save, end screens.
 const $ = (id) => document.getElementById(id);
+const SCREENS = ['menu', 'pause', 'garage', 'endscreen'];
 function showScreen(id) {
-  for (const s of ['menu', 'pause', 'garage', 'endscreen']) {
-    $(s).style.display = s === id ? 'flex' : 'none';
-  }
-  if (!id) {
-    for (const s of ['menu', 'pause', 'garage', 'endscreen']) $(s).style.display = 'none';
-  }
+  for (const s of SCREENS) $(s).style.display = s === id ? 'flex' : 'none';
+}
+
+function homePosition() {
+  playerMesh.position.set(WORLD.garage.x + 4, 0, WORLD.garage.z + 12);
 }
 
 function startGame(fresh) {
@@ -216,7 +231,7 @@ function startGame(fresh) {
     G.missionsDone = 0;
     G.health = 100;
     G.upgrades = { engine: 0, handling: 0, armor: 0 };
-    playerMesh.position.set(WORLD.garage.x + 4, 0, WORLD.garage.z + 12);
+    homePosition();
     police.reset();
     combat.clearEnemies();
   }
@@ -227,10 +242,7 @@ function startGame(fresh) {
   hud.say('Carmen', 'Okay. One job at a time. Tomas owes fifty grand, and I am the one paying it.');
   refreshMarker();
   if (missions.M.active) ctx.setMarker(missions.currentTarget());
-  else if (G.marker) {
-    beacon.position.set(G.marker.x, 7, G.marker.z);
-    beaconBase.position.set(G.marker.x, 0.3, G.marker.z);
-  }
+  else if (G.marker) moveBeacon(G.marker.x, G.marker.z);
 }
 
 function showEnd(title, text) {
@@ -317,7 +329,7 @@ function openGarage() {
   showScreen('garage');
 }
 
-// ---- Entering and stealing cars ----
+// Entering and stealing cars.
 function nearestCar(maxDist) {
   const p = G.playerPos();
   let best = null;
@@ -374,7 +386,7 @@ function exitCar() {
   G.car = null;
 }
 
-// ---- Shooting ----
+// Shooting.
 function tryShoot() {
   if (G.inCar || G.state !== 'playing') return;
   const dir = { x: Math.sin(G.heading), z: Math.cos(G.heading) };
@@ -392,7 +404,75 @@ function tryShoot() {
   }
 }
 
-// ---- Main loop ----
+// Driving and walking, one step of the frame.
+function stepDriving(dt) {
+  const car = G.car;
+  const drv = {
+    forward: pressed(input, 'KeyW', 'ArrowUp'),
+    back: pressed(input, 'KeyS', 'ArrowDown'),
+    left: pressed(input, 'KeyA', 'ArrowLeft'),
+    right: pressed(input, 'KeyD', 'ArrowRight'),
+    brake: pressed(input, 'Space'),
+  };
+  const before = { x: car.pos.x, z: car.pos.z };
+  driveCar(car, drv, dt, G.upgrades);
+  car.mesh.position.y = deckHeight(car.pos.x, car.pos.z);
+  collide(car.pos, 2.2, city.colliders);
+  clampToLand(car.pos, 2.2);
+  // Stuck against a wall at speed: scrape off speed and kick up dust.
+  if (Math.abs(car.pos.x - before.x) < 0.001 && Math.abs(car.pos.z - before.z) < 0.001 && Math.abs(car.speed) > 4) {
+    car.speed *= 0.4;
+    puff(car.pos.x, car.pos.z);
+  }
+  if (Math.abs(car.speed) > 18 && Math.random() < dt * 2) {
+    puff(car.pos.x - Math.sin(car.heading) * 2, car.pos.z - Math.cos(car.heading) * 2);
+  }
+  // Hitting a pedestrian is a crime.
+  for (const pd of peds.peds) {
+    if (Math.hypot(pd.pos.x - car.pos.x, pd.pos.z - car.pos.z) < 2.4) {
+      pd.pos.x += Math.sin(car.heading) * 6;
+      pd.pos.z += Math.cos(car.heading) * 6;
+      if (police.wanted < 2) police.addWanted(1, 'hit a pedestrian');
+      hud.flash('You hit someone. The city saw that.');
+    }
+  }
+  car.mesh.userData.headlight.intensity = G.timeOfDay === 2 ? 2.2 : 0;
+  audio.setEngine(Math.abs(car.speed) / 36, true);
+  // A wrecked car strands you: climb out, it stays as a wreck.
+  if ((car.hp || 100) <= 0 && G.upgrades.armor < 99) {
+    hud.flash('The car is wrecked. Get out.');
+    exitCar();
+  }
+}
+
+function stepWalking(dt, time) {
+  const sprint = pressed(input, 'ShiftLeft', 'ShiftRight') ? 1.5 : 1;
+  const f = (pressed(input, 'KeyW', 'ArrowUp') ? 1 : 0) - (pressed(input, 'KeyS', 'ArrowDown') ? 1 : 0);
+  const s = (pressed(input, 'KeyD', 'ArrowRight') ? 1 : 0) - (pressed(input, 'KeyA', 'ArrowLeft') ? 1 : 0);
+  const yaw = input.yaw;
+  const mx = Math.sin(yaw) * f + Math.cos(yaw) * s;
+  const mz = Math.cos(yaw) * f - Math.sin(yaw) * s;
+  const len = Math.hypot(mx, mz);
+  const [legL, legR] = playerMesh.userData.legs;
+  if (len > 0.01) {
+    const sp = 6 * sprint;
+    playerMesh.position.x += (mx / len) * sp * dt;
+    playerMesh.position.z += (mz / len) * sp * dt;
+    playerMesh.rotation.y = Math.atan2(mx, mz);
+    const ph = time * 10;
+    legL.rotation.x = Math.sin(ph) * 0.6;
+    legR.rotation.x = -Math.sin(ph) * 0.6;
+  } else {
+    legL.rotation.x = 0;
+    legR.rotation.x = 0;
+  }
+  collide(playerMesh.position, 0.7, city.colliders);
+  clampToLand(playerMesh.position, 0.7);
+  playerMesh.position.y = deckHeight(playerMesh.position.x, playerMesh.position.z);
+  audio.setEngine(0, false);
+}
+
+// Main loop.
 let last = performance.now();
 let eWasDown = false;
 let fWasDown = false;
@@ -417,8 +497,8 @@ function frame(now) {
       p.mesh.scale.setScalar(1 + (0.6 - p.life) * 3);
     }
   }
-  beacon.rotation.y += dt;
-  beacon.material.opacity = 0.28 + Math.sin(time * 3) * 0.1;
+  beacon.beam.rotation.y += dt;
+  beacon.beam.material.opacity = 0.28 + Math.sin(time * 3) * 0.1;
   if (G.state !== 'playing') {
     R.render();
     return;
@@ -481,70 +561,8 @@ function frame(now) {
   if (G.inCar) input.yaw += ((G.car.heading + Math.PI) - input.yaw) * Math.min(1, dt * 0.8);
   G.heading = G.inCar ? G.car.heading : input.yaw + Math.PI;
 
-  if (G.inCar) {
-    const car = G.car;
-    const drv = {
-      forward: pressed(input, 'KeyW', 'ArrowUp'),
-      back: pressed(input, 'KeyS', 'ArrowDown'),
-      left: pressed(input, 'KeyA', 'ArrowLeft'),
-      right: pressed(input, 'KeyD', 'ArrowRight'),
-      brake: pressed(input, 'Space'),
-    };
-    const before = { x: car.pos.x, z: car.pos.z };
-    driveCar(car, drv, dt, G.upgrades);
-    car.mesh.position.y = deckHeight(car.pos.x, car.pos.z);
-    collide(car.pos, 2.2, city.colliders);
-    clampToLand(car.pos, 2.2);
-    // Stuck against a wall at speed: scrape off speed and kick up dust.
-    if (Math.abs(car.pos.x - before.x) < 0.001 && Math.abs(car.pos.z - before.z) < 0.001 && Math.abs(car.speed) > 4) {
-      car.speed *= 0.4;
-      puff(car.pos.x, car.pos.z);
-    }
-    if (Math.abs(car.speed) > 18 && Math.random() < dt * 2) {
-      puff(car.pos.x - Math.sin(car.heading) * 2, car.pos.z - Math.cos(car.heading) * 2);
-    }
-    // Hitting a pedestrian is a crime.
-    for (const pd of peds.peds) {
-      if (Math.hypot(pd.pos.x - car.pos.x, pd.pos.z - car.pos.z) < 2.4) {
-        pd.pos.x += Math.sin(car.heading) * 6;
-        pd.pos.z += Math.cos(car.heading) * 6;
-        if (police.wanted < 2) police.addWanted(1, 'hit a pedestrian');
-        hud.flash('You hit someone. The city saw that.');
-      }
-    }
-    car.mesh.userData.headlight.intensity = G.timeOfDay === 2 ? 2.2 : 0;
-    audio.setEngine(Math.abs(car.speed) / 36, true);
-    // A wrecked car strands you: climb out, it stays as a wreck.
-    if ((car.hp || 100) <= 0 && G.upgrades.armor < 99) {
-      hud.flash('The car is wrecked. Get out.');
-      exitCar();
-    }
-  } else {
-    // On foot.
-    const sprint = pressed(input, 'ShiftLeft', 'ShiftRight') ? 1.5 : 1;
-    const f = (pressed(input, 'KeyW', 'ArrowUp') ? 1 : 0) - (pressed(input, 'KeyS', 'ArrowDown') ? 1 : 0);
-    const s = (pressed(input, 'KeyD', 'ArrowRight') ? 1 : 0) - (pressed(input, 'KeyA', 'ArrowLeft') ? 1 : 0);
-    const yaw = input.yaw;
-    const mx = Math.sin(yaw) * f + Math.cos(yaw) * s;
-    const mz = Math.cos(yaw) * f - Math.sin(yaw) * s;
-    const len = Math.hypot(mx, mz);
-    if (len > 0.01) {
-      const sp = 6 * sprint;
-      playerMesh.position.x += (mx / len) * sp * dt;
-      playerMesh.position.z += (mz / len) * sp * dt;
-      playerMesh.rotation.y = Math.atan2(mx, mz);
-      const ph = time * 10;
-      playerMesh.userData.legs[0].rotation.x = Math.sin(ph) * 0.6;
-      playerMesh.userData.legs[1].rotation.x = -Math.sin(ph) * 0.6;
-    } else {
-      playerMesh.userData.legs[0].rotation.x = 0;
-      playerMesh.userData.legs[1].rotation.x = 0;
-    }
-    collide(playerMesh.position, 0.7, city.colliders);
-    clampToLand(playerMesh.position, 0.7);
-    playerMesh.position.y = deckHeight(playerMesh.position.x, playerMesh.position.z);
-    audio.setEngine(0, false);
-  }
+  if (G.inCar) stepDriving(dt);
+  else stepWalking(dt, time);
 
   // Mission start: walk or drive into the garage marker.
   if (!missions.M.active && G.marker && G.marker.startMission) {
@@ -566,7 +584,7 @@ function frame(now) {
     if (G.health <= 0) {
       G.health = 100;
       G.money = Math.max(0, G.money - 200);
-      playerMesh.position.set(WORLD.garage.x + 4, 0, WORLD.garage.z + 12);
+      homePosition();
       if (G.inCar) exitCar();
       showEnd('You got hurt bad', 'The crew patched you up at the garage. Hospital bill: $200. The debt is still waiting.');
     }
@@ -578,7 +596,7 @@ function frame(now) {
     police.reset();
     G.wanted = 0;
     G.money = Math.max(0, G.money - 300);
-    playerMesh.position.set(WORLD.garage.x + 4, 0, WORLD.garage.z + 12);
+    homePosition();
     if (G.inCar) exitCar();
     showEnd('Busted', 'The police took you in. Fine: $300. Carmen walks out of the station and straight back to work.');
   }
@@ -599,7 +617,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-// ---- Screenshot staging (?shot=cover|drive|mission|city) ----
+// Screenshot staging (?shot=cover|drive|mission|city).
 window.__game = G;
 window.__sys = { missions, ctx, police, combat, traffic, peds, playerMesh, R, WORLD, enterCar, exitCar, hud, city };
 const params = new URLSearchParams(location.search);

@@ -1,5 +1,9 @@
 // Keyboard and mouse input. One job: remember which keys are down and turn
 // drags into camera yaw and pitch. Nothing here knows what the keys do.
+const DRAG_YAW = 0.005;
+const DRAG_PITCH = 0.004;
+const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
 export function createInput(canvas) {
   const keys = {};
   const input = {
@@ -12,45 +16,44 @@ export function createInput(canvas) {
     lastY: 0,
   };
 
+  function clearKeys() {
+    for (const code of Object.keys(keys)) keys[code] = false;
+  }
+
+  function dragBy(dx, dy) {
+    input.yaw -= dx * DRAG_YAW;
+    input.pitch = Math.max(-0.1, Math.min(0.9, input.pitch + dy * DRAG_PITCH));
+  }
+
+  function pointerDown(x, y) {
+    input.dragging = true;
+    input.clicked = true;
+    input.lastX = x;
+    input.lastY = y;
+  }
+
+  function pointerMove(x, y) {
+    if (!input.dragging) return;
+    dragBy(x - input.lastX, y - input.lastY);
+    input.lastX = x;
+    input.lastY = y;
+  }
+
   addEventListener('keydown', (e) => {
     keys[e.code] = true;
     // Stop the page scrolling when the game uses these keys.
-    if (
-      e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' ||
-      e.code === 'ArrowLeft' || e.code === 'ArrowRight'
-    ) {
-      e.preventDefault();
-    }
+    if (SCROLL_KEYS.has(e.code)) e.preventDefault();
   });
   addEventListener('keyup', (e) => { keys[e.code] = false; });
-  addEventListener('blur', () => {
-    // Losing focus must never leave a key stuck down.
-    for (const code of Object.keys(keys)) keys[code] = false;
-  });
+  // Losing focus must never leave a key stuck down.
+  addEventListener('blur', clearKeys);
 
-  function dragBy(dx, dy) {
-    input.yaw -= dx * 0.005;
-    input.pitch = Math.max(-0.1, Math.min(0.9, input.pitch + dy * 0.004));
-  }
-
-  canvas.addEventListener('mousedown', (e) => {
-    input.dragging = true;
-    input.clicked = true;
-    input.lastX = e.clientX;
-    input.lastY = e.clientY;
-  });
+  canvas.addEventListener('mousedown', (e) => pointerDown(e.clientX, e.clientY));
   addEventListener('mouseup', () => { input.dragging = false; });
-  addEventListener('mousemove', (e) => {
-    if (!input.dragging) return;
-    dragBy(e.clientX - input.lastX, e.clientY - input.lastY);
-    input.lastX = e.clientX;
-    input.lastY = e.clientY;
-  });
+  addEventListener('mousemove', (e) => pointerMove(e.clientX, e.clientY));
 
   canvas.addEventListener('touchstart', (e) => {
-    input.dragging = true;
-    input.lastX = e.touches[0].clientX;
-    input.lastY = e.touches[0].clientY;
+    pointerDown(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: true });
   canvas.addEventListener('touchmove', (e) => {
     if (!input.dragging) return;

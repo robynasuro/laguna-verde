@@ -2,22 +2,33 @@
 // ahead. One job: keep the streets busy and believable.
 import { makeCar, CAR_DEFS } from './cars.js';
 
-export function createTraffic(scene, nodes, rng) {
-  const cars = [];
+function wrapAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+function buildLoops() {
   // Six rectangular loops around pairs of roads, covering the whole grid.
+  const xs = [-120, -60, 0, 60, 120];
+  const zs = [-180, -120, -60, 0, 60, 120];
   const loops = [];
   for (let i = 0; i < 6; i++) {
-    const x1 = [-120, -60, 0, 60, 120][i % 5];
-    const x2 = x1 + 60;
-    const z1 = [-180, -120, -60, 0, 60, 120][(i * 2) % 6];
-    const z2 = z1 + 60;
+    const x1 = xs[i % 5];
+    const z1 = zs[(i * 2) % 6];
     loops.push([
       { x: x1, z: z1 },
-      { x: x2, z: z1 },
-      { x: x2, z: z2 },
-      { x: x1, z: z2 },
+      { x: x1 + 60, z: z1 },
+      { x: x1 + 60, z: z1 + 60 },
+      { x: x1, z: z1 + 60 },
     ]);
   }
+  return loops;
+}
+
+export function createTraffic(scene, nodes, rng) {
+  const loops = buildLoops();
+  const cars = [];
   for (let i = 0; i < 14; i++) {
     const def = CAR_DEFS[Math.floor(rng() * CAR_DEFS.length)];
     const loop = loops[i % loops.length];
@@ -29,6 +40,19 @@ export function createTraffic(scene, nodes, rng) {
     cars.push(car);
   }
 
+  // True when another car sits in the wedge in front of this car's nose.
+  function blockedAhead(car, others) {
+    for (const o of others) {
+      if (o === car) continue;
+      const ox = o.pos.x - car.pos.x;
+      const oz = o.pos.z - car.pos.z;
+      const ahead = ox * Math.sin(car.heading) + oz * Math.cos(car.heading);
+      const side = Math.abs(ox * Math.cos(car.heading) - oz * Math.sin(car.heading));
+      if (ahead > 0 && ahead < 9 && side < 2.6) return true;
+    }
+    return false;
+  }
+
   function update(dt, playerCar, policeCars) {
     // Traffic stops for anything in front of it, player included.
     const all = [...cars, ...(playerCar ? [playerCar] : []), ...policeCars];
@@ -36,30 +60,14 @@ export function createTraffic(scene, nodes, rng) {
       const target = car.loop[car.wp];
       const dx = target.x - car.pos.x;
       const dz = target.z - car.pos.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 4) {
+      if (Math.hypot(dx, dz) < 4) {
         car.wp = (car.wp + 1) % car.loop.length;
         continue;
       }
       const want = Math.atan2(dx, dz);
-      let diff = want - car.heading;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
+      const diff = wrapAngle(want - car.heading);
       car.heading += Math.max(-2.2 * dt, Math.min(2.2 * dt, diff * 2));
-      // Check the wedge in front of the nose for a car to stop behind.
-      let blocked = false;
-      for (const o of all) {
-        if (o === car) continue;
-        const ox = o.pos.x - car.pos.x;
-        const oz = o.pos.z - car.pos.z;
-        const ahead = ox * Math.sin(car.heading) + oz * Math.cos(car.heading);
-        const side = Math.abs(ox * Math.cos(car.heading) - oz * Math.sin(car.heading));
-        if (ahead > 0 && ahead < 9 && side < 2.6) {
-          blocked = true;
-          break;
-        }
-      }
-      const wantSpeed = blocked ? 0 : car.cruise;
+      const wantSpeed = blockedAhead(car, all) ? 0 : car.cruise;
       car.speed += (wantSpeed - car.speed) * Math.min(1, dt * 2);
       car.pos.x += Math.sin(car.heading) * car.speed * dt;
       car.pos.z += Math.cos(car.heading) * car.speed * dt;

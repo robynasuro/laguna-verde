@@ -6,6 +6,7 @@ const STATIONS = [
   { name: 'TIBURON ROCK 94.7', desc: 'Garage rock', root: 110, scale: [0, 2, 3, 5, 7, 10] },
   { name: 'MAREA LATINA 88.5', desc: 'Cumbia nights', root: 196, scale: [0, 2, 4, 5, 7, 9, 11] },
 ];
+const RADIO_STEP_MS = 210;
 
 export function createAudio() {
   const A = {
@@ -66,22 +67,20 @@ export function createAudio() {
   A.startRadio = () => {
     if (!A.ctx) return;
     let step = 0;
-    const tick = () => {
+    const playStep = () => {
       if (!A.ctx) return;
-      if (A.muted || !A.radioOn) {
-        A.radioTimer = setTimeout(tick, 200);
-        return;
-      }
       const st = STATIONS[A.station];
-      const t = A.ctx.currentTime + 0.05;
-      const deg = st.scale[step % st.scale.length];
-      const f = st.root * Math.pow(2, deg / 12) * (step % 8 === 0 ? 2 : 1);
-      A.note(f, t, 0.22, 'triangle', 0.05);
-      if (step % 4 === 2) A.note(st.root / 2, t, 0.3, 'sine', 0.08);
-      step += 1;
-      A.radioTimer = setTimeout(tick, 210);
+      if (!A.muted && A.radioOn) {
+        const t = A.ctx.currentTime + 0.05;
+        const deg = st.scale[step % st.scale.length];
+        const f = st.root * Math.pow(2, deg / 12) * (step % 8 === 0 ? 2 : 1);
+        A.note(f, t, 0.22, 'triangle', 0.05);
+        if (step % 4 === 2) A.note(st.root / 2, t, 0.3, 'sine', 0.08);
+        step += 1;
+      }
+      A.radioTimer = setTimeout(playStep, RADIO_STEP_MS);
     };
-    tick();
+    playStep();
   };
 
   A.setEngine = (speedNorm, driving) => {
@@ -101,7 +100,8 @@ export function createAudio() {
   A.shot = () => {
     if (!A.ctx || A.muted) return;
     const t = A.ctx.currentTime;
-    const buf = A.ctx.createBuffer(1, Math.floor(A.ctx.sampleRate * 0.12), A.ctx.sampleRate);
+    const len = Math.floor(A.ctx.sampleRate * 0.12);
+    const buf = A.ctx.createBuffer(1, len, A.ctx.sampleRate);
     const d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
     const src = A.ctx.createBufferSource();
@@ -119,6 +119,7 @@ export function createAudio() {
     if (on && !A.sirenOsc) {
       A.sirenOsc = A.ctx.createOscillator();
       A.sirenOsc.type = 'sine';
+      A.sirenOsc.frequency.value = 750;
       const g = A.ctx.createGain();
       g.gain.value = A.muted ? 0 : 0.03;
       const lfo = A.ctx.createOscillator();
@@ -127,7 +128,6 @@ export function createAudio() {
       lg.gain.value = 220;
       lfo.connect(lg);
       lg.connect(A.sirenOsc.frequency);
-      A.sirenOsc.frequency.value = 750;
       A.sirenOsc.connect(g);
       g.connect(A.ctx.destination);
       A.sirenOsc.start();

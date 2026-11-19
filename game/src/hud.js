@@ -1,6 +1,9 @@
 // HUD and minimap: health, money, debt meter, wanted stars, speed,
 // objective, dialogue box, messages, and the top-down minimap canvas. One
 // job: everything the player reads on screen.
+const MAP_SIZE = 190;
+const MAP_SPAN = 560;
+
 export function createHud() {
   const $ = (id) => document.getElementById(id);
   const el = {
@@ -31,12 +34,16 @@ export function createHud() {
     el.hud.style.display = 'none';
   }
 
-  function update(G) {
+  function starsHtml(wanted) {
     let s = '';
     for (let i = 1; i <= 5; i++) {
-      s += '<span class="' + (i <= G.wanted ? '' : 'off') + '">&#9733;</span>';
+      s += '<span class="' + (i <= wanted ? '' : 'off') + '">&#9733;</span>';
     }
-    el.stars.innerHTML = s;
+    return s;
+  }
+
+  function update(G) {
+    el.stars.innerHTML = starsHtml(G.wanted);
     el.health.style.width = Math.max(0, G.health) + '%';
     el.health.style.background = G.health > 50 ? '#3ddc74' : G.health > 25 ? '#ffd23e' : '#ff4444';
     el.money.textContent = '$' + G.money.toLocaleString();
@@ -74,33 +81,44 @@ export function createHud() {
     setTimeout(() => { el.toast.style.display = 'none'; }, 2200);
   }
 
+  // Minimap helpers: world coords to map pixels, and a dot at a spot.
+  const scale = MAP_SIZE / MAP_SPAN;
+  const toX = (x) => (x + 280) * scale;
+  const toZ = (z) => (z + 280) * scale;
+  function dot(x, z, r, color) {
+    mm.fillStyle = color;
+    mm.beginPath();
+    mm.arc(toX(x), toZ(z), r, 0, 7);
+    mm.fill();
+  }
+  function roadLines(coords, vertical) {
+    mm.strokeStyle = '#3a3f45';
+    mm.lineWidth = 5;
+    for (const c of coords) {
+      mm.beginPath();
+      if (vertical) {
+        mm.moveTo(toX(c), 0);
+        mm.lineTo(toX(c), MAP_SIZE);
+      } else {
+        mm.moveTo(0, toZ(c));
+        mm.lineTo(MAP_SIZE, toZ(c));
+      }
+      mm.stroke();
+    }
+  }
+
   // Minimap: lagoon blue, land sand, roads grey, player green, marker
   // yellow, police blue, garage orange, Ferris wheel pink, lighthouse white.
   function drawMinimap(G) {
-    const S = 190;
-    const scale = S / 560;
-    const toX = (x) => (x + 280) * scale;
-    const toZ = (z) => (z + 280) * scale;
+    const S = MAP_SIZE;
     mm.fillStyle = '#1fa8b8';
     mm.fillRect(0, 0, S, S);
     mm.fillStyle = '#8a7a5a';
     mm.fillRect(toX(-150), 0, S - toX(-150), S);
     mm.fillStyle = '#e8d49a';
     mm.fillRect(toX(-152), 0, 6, S);
-    mm.strokeStyle = '#3a3f45';
-    mm.lineWidth = 5;
-    for (const x of [-120, -60, 0, 60, 120, 180]) {
-      mm.beginPath();
-      mm.moveTo(toX(x), 0);
-      mm.lineTo(toX(x), S);
-      mm.stroke();
-    }
-    for (const z of [-180, -120, -60, 0, 60, 120, 180]) {
-      mm.beginPath();
-      mm.moveTo(0, toZ(z));
-      mm.lineTo(S, toZ(z));
-      mm.stroke();
-    }
+    roadLines([-120, -60, 0, 60, 120, 180], true);
+    roadLines([-180, -120, -60, 0, 60, 120, 180], false);
     // The causeway across the lagoon.
     mm.strokeStyle = '#d8d0c0';
     mm.lineWidth = 3;
@@ -111,35 +129,16 @@ export function createHud() {
     // Garage, Ferris wheel, lighthouse.
     mm.fillStyle = '#ff9f2e';
     mm.fillRect(toX(-132) - 4, toZ(66) - 4, 8, 8);
-    mm.fillStyle = '#ff5d8f';
-    mm.beginPath();
-    mm.arc(toX(-195), toZ(0), 5, 0, 7);
-    mm.fill();
-    mm.fillStyle = '#fff';
-    mm.beginPath();
-    mm.arc(toX(-228), toZ(-185), 4, 0, 7);
-    mm.fill();
+    dot(-195, 0, 5, '#ff5d8f');
+    dot(-228, -185, 4, '#fff');
     // Police blips, helicopter included.
-    mm.fillStyle = '#2244ff';
-    for (const c of G.police.cars) {
-      mm.beginPath();
-      mm.arc(toX(c.pos.x), toZ(c.pos.z), 3.5, 0, 7);
-      mm.fill();
-    }
-    if (G.police.heli) {
-      mm.fillStyle = '#88aaff';
-      mm.beginPath();
-      mm.arc(toX(G.police.heli.pos.x), toZ(G.police.heli.pos.z), 4, 0, 7);
-      mm.fill();
-    }
+    for (const c of G.police.cars) dot(c.pos.x, c.pos.z, 3.5, '#2244ff');
+    if (G.police.heli) dot(G.police.heli.pos.x, G.police.heli.pos.z, 4, '#88aaff');
     // Mission marker, pulsing.
     const t = G.marker;
     if (t) {
       const r = 6 + Math.sin(performance.now() / 200) * 2;
-      mm.fillStyle = '#ffd23e';
-      mm.beginPath();
-      mm.arc(toX(t.x), toZ(t.z), r, 0, 7);
-      mm.fill();
+      dot(t.x, t.z, r, '#ffd23e');
       mm.fillStyle = '#000';
       mm.font = 'bold 9px Verdana';
       mm.fillText('!', toX(t.x) - 2, toZ(t.z) + 3);

@@ -2,6 +2,14 @@
 // scene and put the camera where it belongs. No gameplay rules live here.
 import * as THREE from '../vendor/three.module.min.js';
 
+// Sky, fog, sun and pier light for each time of day: 0 noon, 1 golden hour,
+// 2 dusk. One table drives setTimeOfDay, so the look stays consistent.
+const DAY_PHASES = [
+  { sky: 0x87ceeb, sun: 0xfff2cc, sunPower: 2.6, pier: 0 },
+  { sky: 0xffc98a, sun: 0xffd9a0, sunPower: 2.2, pier: 0 },
+  { sky: 0x2a3a5e, sun: 0xff9f6e, sunPower: 0.7, pier: 1.6 },
+];
+
 export function createRender(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -11,20 +19,16 @@ export function createRender(canvas) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffc98a);
-  scene.fog = new THREE.Fog(0xffc98a, 220, 620);
+  scene.background = new THREE.Color(DAY_PHASES[1].sky);
+  scene.fog = new THREE.Fog(DAY_PHASES[1].sky, 220, 620);
   const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
 
   // Low golden sun from the west, so the lagoon side catches the light.
-  const sun = new THREE.DirectionalLight(0xffd9a0, 2.2);
+  const sun = new THREE.DirectionalLight(DAY_PHASES[1].sun, DAY_PHASES[1].sunPower);
   sun.position.set(-180, 120, -80);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -260;
-  sun.shadow.camera.right = 260;
-  sun.shadow.camera.top = 260;
-  sun.shadow.camera.bottom = -260;
-  sun.shadow.camera.far = 700;
+  Object.assign(sun.shadow.camera, { left: -260, right: 260, top: 260, bottom: -260, far: 700 });
   scene.add(sun);
   scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x8a6a4a, 0.9));
   // Warm point light over the pier that only matters at dusk.
@@ -50,28 +54,13 @@ export function createRender(canvas) {
   addEventListener('resize', resize);
   resize();
 
-  // Time of day: 0 noon, 1 golden hour, 2 dusk. It sets the sky, the fog,
-  // the sun and the pier lights in one place.
   function setTimeOfDay(t) {
-    if (t < 0.5) {
-      scene.background.set(0x87ceeb);
-      scene.fog.color.set(0x87ceeb);
-      sun.intensity = 2.6;
-      sun.color.set(0xfff2cc);
-      pierGlow.intensity = 0;
-    } else if (t < 1.5) {
-      scene.background.set(0xffc98a);
-      scene.fog.color.set(0xffc98a);
-      sun.intensity = 2.2;
-      sun.color.set(0xffd9a0);
-      pierGlow.intensity = 0;
-    } else {
-      scene.background.set(0x2a3a5e);
-      scene.fog.color.set(0x2a3a5e);
-      sun.intensity = 0.7;
-      sun.color.set(0xff9f6e);
-      pierGlow.intensity = 1.6;
-    }
+    const phase = DAY_PHASES[Math.max(0, Math.min(2, t))];
+    scene.background.set(phase.sky);
+    scene.fog.color.set(phase.sky);
+    sun.intensity = phase.sunPower;
+    sun.color.set(phase.sun);
+    pierGlow.intensity = phase.pier;
   }
 
   // Chase camera: ease toward a point behind the target, look a little
@@ -82,8 +71,10 @@ export function createRender(canvas) {
       target.y + Math.sin(pitch) * dist + 2,
       target.z - Math.cos(yaw) * Math.cos(pitch) * dist,
     );
-    cam.pos.lerp(desired, 1 - Math.pow(0.0001, dt));
-    cam.look.lerp(target, 1 - Math.pow(0.00001, dt));
+    const ease = 1 - Math.exp(-6 * dt);
+    const lookEase = 1 - Math.exp(-8 * dt);
+    cam.pos.lerp(desired, ease);
+    cam.look.lerp(target, lookEase);
     camera.position.copy(cam.pos);
     camera.lookAt(cam.look.x, cam.look.y + 1.5, cam.look.z);
   }

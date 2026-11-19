@@ -176,13 +176,11 @@ export function createMissionEngine() {
     ctx.onFail(mission, reason);
   }
 
-  function update(dt, ctx) {
-    if (!M.active) return;
-    const mission = M.active;
-    const s = mission.steps[M.stepIdx];
-    const p = ctx.playerPos();
-
-    if (s.type === 'goto') {
+  // One handler per step type. Each returns nothing; handlers call advance
+  // or failMission when their step is done.
+  const STEP_HANDLERS = {
+    goto(mission, s, ctx) {
+      const p = ctx.playerPos();
       if (Math.hypot(p.x - s.x, p.z - s.z) >= 7) return;
       // Mission 2: grabbing the package triggers the ambush.
       if (M.stepIdx === 0 && mission.ambushAt === 0) {
@@ -191,8 +189,9 @@ export function createMissionEngine() {
         ctx.say('Rico', 'Sharks. Right on time. Do not let them take the package.');
       }
       advance(ctx);
-    } else if (s.type === 'race') {
-      M.timer += dt;
+    },
+    race(mission, s, ctx) {
+      const p = ctx.playerPos();
       const pt = s.points[M.cpIdx];
       if (Math.hypot(p.x - pt[0], p.z - pt[1]) < 10) {
         M.cpIdx += 1;
@@ -204,8 +203,8 @@ export function createMissionEngine() {
         ctx.say('Tomas', 'Checkpoint ' + (M.cpIdx + 1) + ' of ' + s.points.length + '. Keep it flat out.');
       }
       if (M.timer > s.timeLimit) ctx.failMission('Out of time. Tomas is already laughing at you.');
-    } else if (s.type === 'evade') {
-      M.timer += dt;
+    },
+    evade(mission, s, ctx) {
       // The step ends the moment the heat is gone.
       if (ctx.wanted() === 0) {
         advance(ctx);
@@ -213,9 +212,19 @@ export function createMissionEngine() {
       }
       // A minute past the target time with the police still on you is a fail.
       if (M.timer > s.seconds + 60) ctx.failMission('The police never lost you. The job is blown.');
-    } else if (s.type === 'defend') {
+    },
+    defend(mission, s, ctx) {
       if (ctx.rivalsLeft() === 0) advance(ctx);
-    }
+    },
+  };
+
+  function update(dt, ctx) {
+    if (!M.active) return;
+    const mission = M.active;
+    const s = mission.steps[M.stepIdx];
+    M.timer += dt;
+    const handler = STEP_HANDLERS[s.type];
+    if (handler) handler(mission, s, ctx);
   }
 
   return { M, start, update, complete, fail, currentTarget, targetOf };

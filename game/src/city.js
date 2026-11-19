@@ -1,10 +1,10 @@
-// Laguna Verde, the city itself: lagoon, causeway, pier, boardwalk, marina,
+// Laguna Verde: the city. Lagoon and causeway, pier and boardwalk, marina,
 // downtown grid, canal houses, hillside villas, lighthouse, palms. This file
-// only builds the static city. It returns the colliders, the road graph and
-// the animated pieces (Ferris wheel, boats) that the main loop moves.
+// only builds the static city. It hands back the colliders, the road graph
+// and the pieces the main loop animates (Ferris wheel, boats).
 import * as THREE from '../vendor/three.module.min.js';
 
-// Seeded random, so every player gets the same city.
+// Deterministic random, so the city is the same for every player.
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -16,8 +16,8 @@ export function mulberry32(seed) {
   };
 }
 
-// The world layout. Everything else in the game reads these numbers, so
-// missions, traffic and the minimap all agree on where things are.
+// The shared layout. Missions, traffic, police and the minimap all read
+// these numbers, so nothing disagrees about where things are.
 export const WORLD = {
   bound: 260,
   lagoonX: -150,
@@ -44,9 +44,9 @@ export function buildCity(scene, rng) {
   const hitbox = (x, z, hw, hd) =>
     colliders.push({ x0: x - hw, z0: z - hd, x1: x + hw, z1: z + hd });
 
-  // A plain Lambert box that casts and receives shadows. Nearly everything
-  // in the city is one of these, just in different sizes and colours.
-  function block(w, h, d, color, x, y, z) {
+  // A Lambert box that casts and receives shadows. Most of the city is one
+  // of these, in different sizes and colours.
+  function box(w, h, d, color, x, y, z) {
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, d),
       new THREE.MeshLambertMaterial({ color }),
@@ -57,7 +57,7 @@ export function buildCity(scene, rng) {
     return mesh;
   }
 
-  function flat(w, d, color, x, y, z, opacity = 1) {
+  function ground(w, d, color, x, y, z, opacity = 1) {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, d),
       new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity }),
@@ -68,13 +68,13 @@ export function buildCity(scene, rng) {
     return mesh;
   }
 
-  // --- Ground: land east, sand strip, open water west and north. ---
-  group.add(flat(420, 540, 0x8a7a5a, 60, 0, 0));
-  group.add(flat(24, 540, 0xe8d49a, -138, 0.05, 0));
-  group.add(flat(220, 560, 0x1fa8b8, -260, 0.1, 0, 0.92));
-  group.add(flat(420, 60, 0x1fa8b8, 60, 0.1, -280, 0.92));
+  // Ground: dry land to the east, a sand strip, open water west and north.
+  group.add(ground(420, 540, 0x8a7a5a, 60, 0, 0));
+  group.add(ground(24, 540, 0xe8d49a, -138, 0.05, 0));
+  group.add(ground(220, 560, 0x1fa8b8, -260, 0.1, 0, 0.92));
+  group.add(ground(420, 60, 0x1fa8b8, 60, 0.1, -280, 0.92));
 
-  // --- Roads: the downtown grid, laid over the land. ---
+  // The downtown grid, laid over the land.
   const roadMat = new THREE.MeshLambertMaterial({ color: 0x3a3f45 });
   for (const x of WORLD.roadsX) {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.roadW, 520), roadMat);
@@ -91,15 +91,15 @@ export function buildCity(scene, rng) {
     group.add(road);
   }
 
-  // --- Causeway bridge across the lagoon at z = 0, with low rails. ---
-  group.add(block(120, 1.2, 16, 0x9a8f7a, -205, 0.6, 0));
-  group.add(block(120, 1, 1, 0xd8d0c0, -205, 1.6, -8));
-  group.add(block(120, 1, 1, 0xd8d0c0, -205, 1.6, 8));
-  // --- Pier deck out into the water, and the boardwalk along the shore. ---
-  group.add(block(70, 1, 18, 0xb98a5a, -182, 0.7, 0));
-  group.add(block(16, 0.6, 300, 0xc9a06a, -146, 0.4, 0));
+  // Causeway bridge across the lagoon at z = 0, with low rails on both sides.
+  group.add(box(120, 1.2, 16, 0x9a8f7a, -205, 0.6, 0));
+  group.add(box(120, 1, 1, 0xd8d0c0, -205, 1.6, -8));
+  group.add(box(120, 1, 1, 0xd8d0c0, -205, 1.6, 8));
+  // Pier deck out into the water, and the boardwalk along the shore.
+  group.add(box(70, 1, 18, 0xb98a5a, -182, 0.7, 0));
+  group.add(box(16, 0.6, 300, 0xc9a06a, -146, 0.4, 0));
 
-  // --- Downtown: one or two pastel buildings per block, varied heights. ---
+  // Downtown: one or two pastel buildings per block, heights varied.
   const pick = () => PASTELS[Math.floor(rng() * PASTELS.length)];
   for (const rx of WORLD.roadsX) {
     for (const rz of WORLD.roadsZ) {
@@ -113,42 +113,42 @@ export function buildCity(scene, rng) {
         const w = 12 + rng() * 12;
         const d = 12 + rng() * 12;
         const h = 8 + rng() * rng() * 42;
-        group.add(block(w, h, d, pick(), bx, h / 2, bz));
-        group.add(block(w + 0.6, 0.8, d + 0.6, 0xffffff, bx, h + 0.3, bz));
+        group.add(box(w, h, d, pick(), bx, h / 2, bz));
+        group.add(box(w + 0.6, 0.8, d + 0.6, 0xffffff, bx, h + 0.3, bz));
         hitbox(bx, bz, w / 2 + 0.5, d / 2 + 0.5);
       }
     }
   }
 
-  // --- Canal district: low colourful houses along the south edge. ---
+  // Canal district: low colourful houses along the south edge.
   for (let i = 0; i < 26; i++) {
     const x = -120 + rng() * 300;
     const z = 200 + rng() * 40;
     const w = 10 + rng() * 8;
     const h = 6 + rng() * 6;
     const d = 9 + rng() * 6;
-    group.add(block(w, h, d, pick(), x, h / 2, z));
-    group.add(block(w + 1, 1, d + 1, 0x8b2e2e, x, h + 0.5, z));
+    group.add(box(w, h, d, pick(), x, h / 2, z));
+    group.add(box(w + 1, 1, d + 1, 0x8b2e2e, x, h + 0.5, z));
     hitbox(x, z, w / 2 + 0.5, d / 2 + 0.5);
   }
 
-  // --- Hillside villas in the north east, cream walls, terracotta roofs. ---
+  // Hillside villas in the north east: cream walls, terracotta roofs.
   for (let i = 0; i < 14; i++) {
     const x = 150 + rng() * 80;
     const z = -230 + rng() * 70;
     const w = 14 + rng() * 8;
     const h = 7 + rng() * 5;
     const d = 12 + rng() * 6;
-    group.add(block(w, h, d, 0xfff1cf, x, h / 2, z));
-    group.add(block(w + 1, 1.2, d + 1, 0xc96f4a, x, h + 0.6, z));
+    group.add(box(w, h, d, 0xfff1cf, x, h / 2, z));
+    group.add(box(w + 1, 1.2, d + 1, 0xc96f4a, x, h + 0.6, z));
     hitbox(x, z, w / 2 + 0.5, d / 2 + 0.5);
   }
 
-  // --- Garage del Sol, Carmen's garage, with a painted sign on the front. ---
+  // Garage del Sol, Carmen's garage, with a painted sign on the front.
   const gx = WORLD.garage.x;
   const gz = WORLD.garage.z;
-  group.add(block(26, 9, 18, 0xff9f2e, gx, 4.5, gz));
-  group.add(block(26.5, 2, 18.5, 0x1a2a33, gx, 9.5, gz));
+  group.add(box(26, 9, 18, 0xff9f2e, gx, 4.5, gz));
+  group.add(box(26.5, 2, 18.5, 0x1a2a33, gx, 9.5, gz));
   const signCanvas = document.createElement('canvas');
   signCanvas.width = 512;
   signCanvas.height = 96;
@@ -168,7 +168,7 @@ export function buildCity(scene, rng) {
   group.add(sign);
   hitbox(gx, gz, 13.5, 9.5);
 
-  // --- Ferris wheel on the pier. It spins in the main loop. ---
+  // Ferris wheel on the pier. The main loop spins it.
   const wheel = new THREE.Group();
   wheel.position.set(WORLD.pier.x, 22, WORLD.pier.z);
   group.add(wheel);
@@ -186,7 +186,7 @@ export function buildCity(scene, rng) {
     spoke.rotation.z = a;
     spoke.translateY(8);
     wheel.add(spoke);
-    wheel.add(block(3, 2.4, 2.4, cabinColors[i % 4], Math.cos(a) * 16, Math.sin(a) * 16, 0));
+    wheel.add(box(3, 2.4, 2.4, cabinColors[i % 4], Math.cos(a) * 16, Math.sin(a) * 16, 0));
   }
   const hub = new THREE.Mesh(
     new THREE.CylinderGeometry(1.2, 1.2, 2, 12),
@@ -194,14 +194,14 @@ export function buildCity(scene, rng) {
   );
   hub.rotation.x = Math.PI / 2;
   wheel.add(hub);
-  const legL = block(1.2, 24, 1.2, 0xffffff, WORLD.pier.x - 6, 11, WORLD.pier.z);
-  const legR = block(1.2, 24, 1.2, 0xffffff, WORLD.pier.x + 6, 11, WORLD.pier.z);
+  const legL = box(1.2, 24, 1.2, 0xffffff, WORLD.pier.x - 6, 11, WORLD.pier.z);
+  const legR = box(1.2, 24, 1.2, 0xffffff, WORLD.pier.x + 6, 11, WORLD.pier.z);
   legL.rotation.z = 0.35;
   legR.rotation.z = -0.35;
   group.add(legL);
   group.add(legR);
 
-  // --- Lighthouse on the point: striped tower on a rock, glowing lamp. ---
+  // Lighthouse on the point: striped tower on a rock, glowing lamp.
   const lx = WORLD.lighthouse.x;
   const lz = WORLD.lighthouse.z;
   const rock = new THREE.Mesh(
@@ -226,7 +226,7 @@ export function buildCity(scene, rng) {
   lamp.position.set(lx, 32, lz);
   group.add(lamp);
 
-  // --- Marina boats, bobbing in the lagoon. ---
+  // Marina boats, bobbing in the lagoon.
   const boats = [];
   for (let i = 0; i < 7; i++) {
     const boat = new THREE.Group();
@@ -248,7 +248,7 @@ export function buildCity(scene, rng) {
     boats.push(boat);
   }
 
-  // --- Palm trees along the boardwalk, the causeway edge and the roads. ---
+  // Palm trees along the boardwalk, the causeway edge and the roads.
   function palmAt(x, z) {
     const palm = new THREE.Group();
     const trunk = new THREE.Mesh(
@@ -281,7 +281,7 @@ export function buildCity(scene, rng) {
   }
   for (let i = 0; i < 10; i++) palmAt(-120 + rng() * 320, -240 + rng() * 20);
 
-  // --- Street lights on the main intersections, glowing heads. ---
+  // Street lights on the main intersections, with glowing heads.
   const lampPosts = [];
   for (const x of WORLD.roadsX) {
     for (const z of WORLD.roadsZ) {
@@ -310,8 +310,8 @@ export function buildCity(scene, rng) {
   return { group, colliders, wheel, boats, lampPosts, nodes, water: null };
 }
 
-// Push a circle out of any building box it overlaps. Used by the player,
-// cars and anything else that walks the streets.
+// Push a circle out of any building box it overlaps. The player, cars and
+// anything else that walks the streets uses this.
 export function collide(pos, radius, colliders) {
   for (const c of colliders) {
     const nx = Math.max(c.x0, Math.min(pos.x, c.x1));

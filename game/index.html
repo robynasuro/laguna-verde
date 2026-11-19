@@ -1,4 +1,4 @@
-<!-- Laguna Verde: Carmen's Debt. Round 3 rebuild, written in the recorded session. -->
+<!-- Laguna Verde: Carmen's Debt. Round 4 rebuild, written in the recorded session. -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -7,10 +7,23 @@
 <link rel="icon" href="data:,">
 <title>Laguna Verde: Carmen's Debt</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a2a33; font-family: Verdana, Geneva, sans-serif; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  /* Page frame: the canvas fills the window, HUD floats over it. */
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #1a2a33; font-family: Verdana, Geneva, sans-serif;
+  }
+  #game {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    display: block; touch-action: none;
+  }
+
+  /* HUD: pointer-events off so the canvas keeps the mouse. */
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; display: none; }
-  #hud .panel { background: rgba(10, 20, 26, 0.62); border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 8px 12px; }
+  #hud .panel {
+    background: rgba(10, 20, 26, 0.62);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px; padding: 8px 12px;
+  }
   #topleft { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
   #stars { font-size: 22px; letter-spacing: 3px; color: #ffd23e; text-shadow: 0 1px 3px #000; }
   #stars .off { color: rgba(255,255,255,0.35); }
@@ -20,41 +33,92 @@
   #debt { font-size: 12px; }
   #debtbar { width: 180px; height: 8px; background: rgba(0,0,0,0.55); border-radius: 4px; overflow: hidden; }
   #debtfill { height: 100%; width: 0%; background: #ff9f2e; }
-  #minimap { position: absolute; top: 12px; right: 12px; border: 2px solid rgba(255,255,255,0.35); border-radius: 50%; background: #0d2b33; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+
+  /* Minimap sits top right; speed bottom right; objective bottom left. */
+  #minimap {
+    position: absolute; top: 12px; right: 12px;
+    border: 2px solid rgba(255,255,255,0.35); border-radius: 50%;
+    background: #0d2b33; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
   #speedo { position: absolute; right: 16px; bottom: 14px; text-align: right; text-shadow: 0 1px 3px #000; }
   #speed { font-size: 34px; font-weight: bold; }
   #veh { font-size: 13px; opacity: 0.9; }
-  #objective { position: absolute; left: 12px; bottom: 14px; max-width: 420px; font-size: 14px; line-height: 1.45; text-shadow: 0 1px 3px #000; }
+  #objective {
+    position: absolute; left: 12px; bottom: 14px; max-width: 420px;
+    font-size: 14px; line-height: 1.45; text-shadow: 0 1px 3px #000;
+  }
   #objective b { color: #ffd23e; }
-  #msg { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-size: 20px; font-weight: bold; text-align: center; text-shadow: 0 2px 6px #000; }
-  #dialog { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); width: 560px; max-width: 86vw; background: rgba(8, 18, 24, 0.82); border-left: 4px solid #ff9f2e; border-radius: 6px; padding: 10px 14px; font-size: 14px; line-height: 1.5; display: none; }
+
+  /* Centre flash message, dialogue box, radio readout, crosshair. */
+  #msg {
+    position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
+    font-size: 20px; font-weight: bold; text-align: center; text-shadow: 0 2px 6px #000;
+  }
+  #dialog {
+    position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%);
+    width: 560px; max-width: 86vw;
+    background: rgba(8, 18, 24, 0.82); border-left: 4px solid #ff9f2e; border-radius: 6px;
+    padding: 10px 14px; font-size: 14px; line-height: 1.5; display: none;
+  }
   #dialog .who { color: #ffd23e; font-weight: bold; }
-  #radio { position: absolute; right: 16px; top: 210px; font-size: 12px; text-align: right; text-shadow: 0 1px 3px #000; opacity: 0.9; }
-  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 20px; display: none; color: #fff; text-shadow: 0 0 4px #000; }
-  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(160deg, rgba(8,30,40,0.88), rgba(60,20,10,0.82)); color: #fff; z-index: 10; }
-  .card { max-width: 640px; width: 92vw; background: rgba(10,22,28,0.92); border: 1px solid rgba(255,210,62,0.45); border-radius: 12px; padding: 26px 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+  #radio {
+    position: absolute; right: 16px; top: 210px;
+    font-size: 12px; text-align: right; text-shadow: 0 1px 3px #000; opacity: 0.9;
+  }
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    font-size: 20px; display: none; color: #fff; text-shadow: 0 0 4px #000;
+  }
+  #toast {
+    position: fixed; left: 50%; bottom: 170px; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 6px;
+    color: #fff; font-size: 14px; display: none; z-index: 20; pointer-events: none;
+  }
+
+  /* Full-screen menus: menu, pause, garage, end screen. */
+  .screen {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg, rgba(8,30,40,0.88), rgba(60,20,10,0.82));
+    color: #fff; z-index: 10;
+  }
+  .card {
+    max-width: 640px; width: 92vw;
+    background: rgba(10,22,28,0.92);
+    border: 1px solid rgba(255,210,62,0.45); border-radius: 12px;
+    padding: 26px 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  }
   .card h1 { margin: 0 0 4px; font-size: 34px; letter-spacing: 1px; color: #ffd23e; }
   .card h2 { margin: 0 0 10px; font-size: 15px; font-weight: normal; color: #9fd8e8; }
   .card p { font-size: 14px; line-height: 1.6; color: #e8e8e8; }
   .card ul { font-size: 13px; line-height: 1.7; color: #d8d8d8; }
   .card kbd { background: #223; border: 1px solid #667; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
-  .btn { pointer-events: auto; cursor: pointer; display: inline-block; margin: 6px 8px 0 0; padding: 11px 22px; border: none; border-radius: 8px; background: #ff9f2e; color: #1a1000; font-size: 16px; font-weight: bold; }
+  .btn {
+    pointer-events: auto; cursor: pointer; display: inline-block;
+    margin: 6px 8px 0 0; padding: 11px 22px;
+    border: none; border-radius: 8px;
+    background: #ff9f2e; color: #1a1000; font-size: 16px; font-weight: bold;
+  }
   .btn.alt { background: #2e6f7e; color: #fff; }
   .btn:hover { filter: brightness(1.12); }
   #garage { display: none; }
-  .upg { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.12); font-size: 14px; }
-  #toast { position: fixed; left: 50%; bottom: 170px; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 6px; color: #fff; font-size: 14px; display: none; z-index: 20; pointer-events: none; }
+  .upg {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.12); font-size: 14px;
+  }
 </style>
 </head>
 <body>
 <canvas id="game" aria-label="Laguna Verde: Carmen's Debt. An open world crime game. Drive, walk, take missions, pay off a debt."></canvas>
+
 <div id="hud">
   <div id="topleft">
     <div id="stars"></div>
-    <div class="panel"><div id="healthbar"><div id="healthfill"></div></div>
-    <div id="money">$0</div>
-    <div id="debt">Debt paid: $0 / $50,000</div>
-    <div id="debtbar"><div id="debtfill"></div></div></div>
+    <div class="panel">
+      <div id="healthbar"><div id="healthfill"></div></div>
+      <div id="money">$0</div>
+      <div id="debt">Debt paid: $0 / $50,000</div>
+      <div id="debtbar"><div id="debtfill"></div></div>
+    </div>
   </div>
   <canvas id="minimap" width="190" height="190"></canvas>
   <div id="radio"></div>

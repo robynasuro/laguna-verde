@@ -2,19 +2,26 @@
 // localStorage so Carmen can pick up where she left off, session after session.
 const KEY = 'laguna-verde-save-v1';
 
+function pack(G) {
+  return {
+    money: G.money,
+    debtPaid: G.debtPaid,
+    missionsDone: G.missionsDone,
+    upgrades: G.upgrades,
+    health: G.health,
+    pos: G.player ? [G.player.pos.x, G.player.pos.z] : [0, 0],
+    time: G.timeOfDay,
+    savedAt: Date.now(),
+  };
+}
+
+function valid(d) {
+  return d && typeof d.money === 'number' && typeof d.missionsDone === 'number';
+}
+
 export function saveGame(G) {
   try {
-    const data = {
-      money: G.money,
-      debtPaid: G.debtPaid,
-      missionsDone: G.missionsDone,
-      upgrades: G.upgrades,
-      health: G.health,
-      pos: G.player ? [G.player.pos.x, G.player.pos.z] : [0, 0],
-      time: G.timeOfDay,
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(KEY, JSON.stringify(data));
+    localStorage.setItem(KEY, JSON.stringify(pack(G)));
     return true;
   } catch {
     // Storage can be full or blocked; the game keeps running either way.
@@ -27,8 +34,7 @@ export function loadGame() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const d = JSON.parse(raw);
-    if (typeof d.money !== 'number' || typeof d.missionsDone !== 'number') return null;
-    return d;
+    return valid(d) ? d : null;
   } catch {
     return null;
   }
