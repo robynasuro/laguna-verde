@@ -1,220 +1,199 @@
-// Story missions. One job: the seven jobs that pay off Tomas's debt
-// — each with a named client, a line of dialogue, an objective on the
-// map, and a payout. The state machine runs one mission at a time.
+// Story missions: the stage machine, the beacon marker, dialogue, payouts
+// and the debt. Missions run in order; finishing one pays money and chips
+// away at Tomas's $50,000 debt. The last one clears it.
 
-import { CONFIG } from './config.js';
+import * as THREE from 'three';
+import { MISSIONS } from './config.js';
+import { setWanted, addWanted } from './police.js';
 
-export const MISSIONS = [
-  {
-    id: 1,
-    name: 'First Fare',
-    client: 'Mrs. Alvarez',
-    brief: 'Mrs. Alvarez needs a lift to Hotel Brisa. Drive smooth, she gets carsick.',
-    dialogue: '"My grandson drives like a maniac. You, mija, you drive like your father did. Careful, yes?"',
-    type: 'drive',
-    target: 'hotel',
-    payout: 400,
-  },
-  {
-    id: 2,
-    name: 'The Pickup',
-    client: 'Rico',
-    brief: 'Collect the package at Mercado Verde. Los Tiburones are watching the market, so keep it quiet.',
-    dialogue: '"Package is under the blue stall. Don\'t look at anyone. Don\'t stop for anyone."',
-    type: 'pickup',
-    target: 'market',
-    payout: 900,
-  },
-  {
-    id: 3,
-    name: 'Race the Tide',
-    client: 'Tomas',
-    brief: 'Tomas bet the Sharks he can outrun their driver along the boardwalk. Win the race, keep the car in one piece.',
-    dialogue: '"Carmen, please. One race. If I win, they forget half of what I owe."',
-    type: 'race',
-    target: 'pier',
-    payout: 1400,
-  },
-  {
-    id: 4,
-    name: 'The Getaway',
-    client: 'Lena',
-    brief: 'Lena needs a fast exit from the Sharks\' den. Lose the police, then bring her to the garage.',
-    dialogue: '"Drive. Don\'t ask what was in the bag. Just drive, and don\'t stop until the stars are gone."',
-    type: 'getaway',
-    target: 'sharksDen',
-    payout: 2200,
-  },
-  {
-    id: 5,
-    name: 'Smuggler\'s Run',
-    client: 'Captain Mendez',
-    brief: 'Run the crates over the causeway to the lighthouse at dusk. The tide waits for no one.',
-    dialogue: '"The light has to stay on, the crates have to move. You know the causeway better than any of my crew."',
-    type: 'deliver',
-    target: 'lighthouse',
-    payout: 3000,
-  },
-  {
-    id: 6,
-    name: 'The Garage Job',
-    client: 'Garage del Sol',
-    brief: 'The Sharks came to collect at the garage. Hold them off, then get the delivery to Casa Azul.',
-    dialogue: '"They think they can walk into my father\'s garage and take what they want. Not today."',
-    type: 'defend',
-    target: 'canalHouse',
-    payout: 4200,
-  },
-  {
-    id: 7,
-    name: 'Clear the Debt',
-    client: 'Tomas',
-    brief: 'The last job. Move the cargo to Villa Miramar, settle the $50,000, and Tomas walks free.',
-    dialogue: '"Fifty thousand. That\'s the number, Carmen. After tonight, I owe nobody anything. Thank you, hermana."',
-    type: 'finale',
-    target: 'villa',
-    payout: 50000,
-  },
-];
+export function createMissions(scene) {
+  // The beacon: a glowing column + a floating ring over the objective.
+  const beacon = new THREE.Group();
+  const column = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.6, 1.6, 30, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd93d, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
+    }),
+  );
+  column.position.y = 15;
+  beacon.add(column);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(1.6, 2.4, 20),
+    new THREE.MeshBasicMaterial({ color: 0xffd93d, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.3;
+  beacon.add(ring);
+  beacon.visible = false;
+  scene.add(beacon);
+  return {
+    list: MISSIONS,
+    index: 0,
+    stage: 0,
+    active: false,
+    done: false,
+    completed: [],
+    beacon,
+    kills: 0,
+    raceStart: 0,
+    raceTime: 0,
+    onComplete: null,
+    onFail: null,
+  };
+}
 
-export class Missions {
-  constructor(layout, onEvent) {
-    this.layout = layout;
-    this.onEvent = onEvent; // (type, data) — 'start', 'objective', 'complete', 'failed', 'dialogue'
-    this.index = 0; // next mission to play
-    this.active = null;
-    this.stage = 'idle'; // idle | toTarget | return | done
-    this.marker = null; // {x, z, label}
-    this.returnPoint = null; // where 'return' stage heads: garage, or Casa Azul for the defend job
-    this.raceProgress = 0;
-    this.enemiesLeft = 0;
-    this.timer = 0;
+export function currentMission(m) {
+  return m.list[m.index] || null;
+}
+
+export function missionObjectiveText(m) {
+  const cur = currentMission(m);
+  if (!cur) return 'Debt cleared. Laguna Verde is yours, Carmen.';
+  if (!m.active) return `Next job: ${cur.name} — ${cur.client}. Walk to the yellow marker or press N to start.`;
+  const stage = cur.stages[m.stage];
+  return stage ? stage.text : cur.name;
+}
+
+export function startMission(m, ctx) {
+  const cur = currentMission(m);
+  if (!cur || m.active) return false;
+  m.active = true;
+  m.stage = 0;
+  m.kills = 0;
+  m.raceStart = ctx.time;
+  if (cur.wanted) setWanted(ctx.police, cur.wanted);
+  if (cur.timeOfDay) ctx.setTimeOfDay(cur.timeOfDay);
+  ctx.hud.showDialogue(cur.client, cur.intro);
+  ctx.hud.showToast(`${cur.name} — ${cur.client}`);
+  ctx.audio.jingle();
+  placeBeacon(m, ctx);
+  return true;
+}
+
+function placeBeacon(m, ctx) {
+  const cur = currentMission(m);
+  if (!cur || !m.active) {
+    m.beacon.visible = false;
+    return;
   }
-
-  get current() {
-    return MISSIONS[this.index] || null;
+  const stage = cur.stages[m.stage];
+  if (!stage || stage.type === 'defend') {
+    // Defend: the beacon stays on the garage.
+    m.beacon.position.set(20, 0, 120);
+    m.beacon.visible = true;
+    return;
   }
+  m.beacon.position.set(stage.target[0], 0, stage.target[1]);
+  m.beacon.visible = true;
+}
 
-  get done() {
-    return this.index >= MISSIONS.length;
+function advanceStage(m, ctx) {
+  const cur = currentMission(m);
+  m.stage += 1;
+  if (m.stage >= cur.stages.length) {
+    completeMission(m, ctx);
+  } else {
+    const stage = cur.stages[m.stage];
+    ctx.hud.showToast(stage.text);
+    placeBeacon(m, ctx);
   }
+}
 
-  get completedCount() {
-    return this.index;
+function completeMission(m, ctx) {
+  const cur = currentMission(m);
+  m.active = false;
+  m.completed.push(cur.id);
+  ctx.player.money += cur.payout;
+  ctx.player.debtPaid = Math.min(50000, ctx.player.debtPaid + cur.payout);
+  m.beacon.visible = false;
+  ctx.hud.showToast(`Job done: ${cur.name} — paid $${cur.payout.toLocaleString()}`);
+  ctx.hud.showDialogue(cur.client, cur.id === 7
+    ? 'It is done. The debt is gone. Tomas is free, and so are we.'
+    : 'Paid. The debt is smaller now. One job at a time.');
+  ctx.audio.jingle();
+  ctx.saveGame();
+  if (cur.id === 7) {
+    m.done = true;
+    ctx.state = 'won';
+    ctx.hud.showWin();
+  } else {
+    m.index += 1;
+    ctx.hud.showMissionComplete(cur);
   }
+  if (m.onComplete) m.onComplete(cur);
+}
 
-  start() {
-    const m = this.current;
-    if (!m) return false;
-    this.active = m;
-    this.stage = 'toTarget';
-    this.timer = 0;
-    const lm = this.layout.landmarks[m.target];
-    this.marker = { x: lm.x, z: lm.z, label: m.name };
-    if (m.type === 'defend') this.enemiesLeft = 3;
-    if (m.type === 'race') this.raceProgress = 0;
-    this.onEvent('start', m);
-    this.onEvent('dialogue', { who: m.client, line: m.dialogue });
-    return true;
+export function failMission(m, ctx, reason) {
+  if (!m.active) return;
+  m.active = false;
+  m.beacon.visible = false;
+  ctx.hud.showToast(`Job failed: ${reason}`);
+  ctx.hud.showMissionFailed(currentMission(m), reason);
+  ctx.player.health = 100;
+  if (m.onFail) m.onFail(reason);
+}
+
+export function updateMissions(m, ctx, dt) {
+  if (!m.active) return;
+  const cur = currentMission(m);
+  if (!cur) return;
+  const stage = cur.stages[m.stage];
+  if (!stage) return;
+  const p = ctx.player;
+  const px = p.car ? p.car.x : p.x;
+  const pz = p.car ? p.car.z : p.z;
+
+  if (stage.type === 'defend') {
+    // Defend counts kills, not position.
+    if (m.kills >= (cur.attackers || 5)) {
+      advanceStage(m, ctx);
+    }
+    return;
   }
+  const dx = stage.target[0] - px;
+  const dz = stage.target[1] - pz;
+  const dist = Math.hypot(dx, dz);
+  m.targetDist = dist;
 
-  // Called every frame with the player's position and state.
-  // Returns 'complete' | 'failed' | null.
-  update(dt, playerPos, inCar, wantedStars) {
-    if (!this.active) return null;
-    const m = this.active;
-    this.timer += dt;
-    const lm = this.layout.landmarks[m.target];
-
-    if (this.stage === 'toTarget') {
-      const d = Math.hypot(playerPos.x - lm.x, playerPos.z - lm.z);
-      if (m.type === 'race') {
-        // Race: checkpoints along the boardwalk, then the pier.
-        this.raceProgress += dt * (inCar ? 1 : 0.25);
-        if (this.raceProgress > 25) {
-          this.stage = 'return';
-          this.returnPoint = this.layout.landmarks.garage;
-          this.marker = { x: this.layout.landmarks.garage.x, z: this.layout.landmarks.garage.z, label: 'Back to the garage' };
-          this.onEvent('objective', { text: 'Race won. Bring the car home.' });
+  if (stage.type === 'pickup') {
+    if (dist < 6) {
+      ctx.hud.showPrompt('Press E to pick up');
+      if (ctx.input.consume('KeyE')) {
+        if (cur.ambush) {
+          ctx.combat.spawnAmbush(ctx, 3);
+          addWanted(ctx.police, 1, 'rival crew');
+          ctx.hud.showDialogue('Rico', 'Told you. Black jackets, two o\u2019clock. Drive!');
         }
-        return null;
+        advanceStage(m, ctx);
       }
-      if (m.type === 'defend' && this.enemiesLeft > 0) {
-        // Enemies arrive at the garage; the player must drop them all.
-        if (d < 30) {
-          this.onEvent('objective', { text: 'Sharks at the garage! Hold them off.' });
-        }
-        return null;
-      }
-      if (d < 14) {
-        if (m.type === 'getaway') {
-          this.stage = 'escape';
-          this.onEvent('objective', { text: 'Lena is in. Lose the police, then get to the garage.' });
-        } else if (m.type === 'finale') {
-          return this.complete();
-        } else {
-          this.stage = 'return';
-          this.returnPoint = this.layout.landmarks.garage;
-          this.marker = { x: this.layout.landmarks.garage.x, z: this.layout.landmarks.garage.z, label: 'Back to Garage del Sol' };
-          this.onEvent('objective', { text: 'Got it. Now back to the garage.' });
-        }
-      }
-      return null;
     }
-
-    if (this.stage === 'escape') {
-      if (wantedStars === 0) {
-        this.stage = 'return';
-        this.returnPoint = this.layout.landmarks.garage;
-        this.marker = { x: this.layout.landmarks.garage.x, z: this.layout.landmarks.garage.z, label: 'Back to Garage del Sol' };
-        this.onEvent('objective', { text: 'Clean. Take Lena home.' });
-      }
-      return null;
+    return;
+  }
+  if (stage.type === 'race') {
+    // Race checkpoints must be hit in order, and the clock is running.
+    m.raceTime = ctx.time - m.raceStart;
+    if (dist < 8) {
+      ctx.hud.showToast(`Checkpoint ${m.stage + 1} of ${cur.stages.length} — ${m.raceTime.toFixed(1)}s`);
+      advanceStage(m, ctx);
     }
-
-    if (this.stage === 'return') {
-      const dest = this.returnPoint || this.layout.landmarks.garage;
-      const d = Math.hypot(playerPos.x - dest.x, playerPos.z - dest.z);
-      if (d < 16) return this.complete();
-      return null;
+    return;
+  }
+  // goto / deliver / escape: reaching the point finishes the stage.
+  const radius = stage.type === 'escape' ? 10 : 7;
+  if (dist < radius) {
+    if (stage.type === 'escape' && ctx.police.wanted >= 4) {
+      ctx.hud.showToast('Too hot. Lose some heat first.');
+      return;
     }
-    return null;
+    advanceStage(m, ctx);
   }
+}
 
-  // An enemy went down during a defend mission.
-  enemyDown() {
-    if (!this.active || this.active.type !== 'defend') return;
-    this.enemiesLeft = Math.max(0, this.enemiesLeft - 1);
-    this.onEvent('objective', { text: this.enemiesLeft + ' Sharks left at the garage.' });
-    if (this.enemiesLeft === 0) {
-      this.stage = 'return';
-      this.returnPoint = this.layout.landmarks.canalHouse;
-      this.marker = { x: this.layout.landmarks.canalHouse.x, z: this.layout.landmarks.canalHouse.z, label: 'Deliver to Casa Azul' };
-      this.onEvent('objective', { text: 'Garage is safe. Now deliver to Casa Azul.' });
-    }
-  }
-
-  complete() {
-    const m = this.active;
-    this.active = null;
-    this.marker = null;
-    this.stage = 'idle';
-    this.index++;
-    this.onEvent('complete', m);
-    return 'complete';
-  }
-
-  fail(reason) {
-    const m = this.active;
-    this.active = null;
-    this.marker = null;
-    this.stage = 'idle';
-    this.onEvent('failed', { mission: m, reason });
-    return 'failed';
-  }
-
-  // The marker the minimap and the world beacon draw.
-  getMarker() {
-    return this.marker;
+// Called by combat when the player defeats an attacker during a defense.
+export function registerKill(m, ctx) {
+  m.kills += 1;
+  const cur = currentMission(m);
+  if (cur && cur.stages[m.stage] && cur.stages[m.stage].type === 'defend') {
+    ctx.hud.showToast(`Attackers stopped: ${m.kills} of ${cur.attackers || 5}`);
   }
 }

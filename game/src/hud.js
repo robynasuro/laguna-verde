@@ -1,260 +1,217 @@
-// The HUD. One job: everything the player reads — health, money, the
-// debt meter, wanted stars, speed, the minimap, messages, dialogue,
-// and the menus (start, pause, garage, mission results). All DOM, no
-// canvas except the minimap itself.
+// HUD, minimap, dialogue, toasts, and every menu overlay. All DOM, no
+// canvas 3D, so it shows up in screenshots exactly as the player sees it.
 
-import { CONFIG } from './config.js';
+import { CONFIG, CONTROLS, GARAGE_UPGRADES } from './config.js';
 
-export class Hud {
-  constructor(onStart, onGarageBuy) {
-    this.onStart = onStart;
-    this.onGarageBuy = onGarageBuy;
-    this.el = {};
-    const ids = [
-      'hud', 'health-fill', 'health-text', 'money', 'debt-fill', 'debt-text',
-      'stars', 'speed', 'vehicle', 'station', 'objective', 'messages',
-      'dialogue', 'dialogue-who', 'dialogue-line', 'minimap',
-      'menu', 'menu-title', 'menu-sub', 'menu-start',
-      'pause-menu', 'resume-btn', 'restart-btn',
-      'result', 'result-title', 'result-text', 'result-btn',
-      'garage', 'garage-list', 'garage-close', 'garage-money',
-      'toast',
-    ];
-    for (const id of ids) {
-      const n = document.getElementById(id);
-      if (n) this.el[id] = n;
-    }
-    this.mapCtx = this.el['minimap'] ? this.el['minimap'].getContext('2d') : null;
-    this.messageTimer = null;
-    this.dialogueTimer = null;
+function el(id) {
+  return document.getElementById(id);
+}
 
-    if (this.el['menu-start']) {
-      this.el['menu-start'].addEventListener('click', () => this.onStart());
-    }
-    if (this.el['resume-btn']) {
-      this.el['resume-btn'].addEventListener('click', () => this.hidePause());
-    }
-    if (this.el['garage-close']) {
-      this.el['garage-close'].addEventListener('click', () => this.hideGarage());
-    }
-    this.paused = false;
-    this.onResume = null;
-    this.onRestart = null;
-    if (this.el['restart-btn']) {
-      this.el['restart-btn'].addEventListener('click', () => {
-        if (this.onRestart) this.onRestart();
-      });
-    }
-    if (this.el['result-btn']) {
-      this.el['result-btn'].addEventListener('click', () => this.hideResult());
-    }
-  }
+export function createHud(ctx) {
+  const hud = {
+    toastTimer: 0,
+    dialogueTimer: 0,
+    promptTimer: 0,
+  };
 
-  setHealth(hp) {
-    if (this.el['health-fill']) this.el['health-fill'].style.width = Math.max(0, hp) + '%';
-    if (this.el['health-text']) this.el['health-text'].textContent = Math.ceil(Math.max(0, hp));
-  }
-
-  setMoney(amount) {
-    if (this.el.money) this.el.money.textContent = '$' + Math.floor(amount).toLocaleString('en-US');
-    if (this.el['garage-money']) this.el['garage-money'].textContent = '$' + Math.floor(amount).toLocaleString('en-US');
-  }
-
-  setDebt(paid) {
-    const pct = Math.min(100, (paid / CONFIG.debtTotal) * 100);
-    if (this.el['debt-fill']) this.el['debt-fill'].style.width = pct + '%';
-    if (this.el['debt-text']) {
-      this.el['debt-text'].textContent = '$' + Math.floor(paid).toLocaleString('en-US') + ' / $' + CONFIG.debtTotal.toLocaleString('en-US');
-    }
-  }
-
-  setWanted(stars) {
-    if (!this.el.stars) return;
-    let s = '';
-    for (let i = 0; i < CONFIG.wantedMax; i++) s += i < stars ? '★' : '☆';
-    this.el.stars.textContent = s;
-    this.el.stars.className = stars > 0 ? 'hot' : '';
-  }
-
-  setSpeed(kmh, inCar) {
-    if (this.el.speed) this.el.speed.textContent = inCar ? Math.round(Math.abs(kmh) * 2.4) + ' km/h' : 'on foot';
-  }
-
-  setVehicle(name) {
-    if (this.el.vehicle) this.el.vehicle.textContent = name || 'On foot';
-  }
-
-  setStation(name) {
-    if (this.el.station) this.el.station.textContent = '♪ ' + name;
-  }
-
-  setObjective(text) {
-    if (this.el.objective) this.el.objective.textContent = text || '';
-  }
-
-  showMessage(text, ms = 4000) {
-    if (!this.el.messages) return;
-    const div = document.createElement('div');
-    div.className = 'msg';
-    div.textContent = text;
-    this.el.messages.appendChild(div);
-    while (this.el.messages.children.length > 4) {
-      this.el.messages.removeChild(this.el.messages.firstChild);
-    }
-    setTimeout(() => div.remove(), ms);
-  }
-
-  showDialogue(who, line, ms = 6000) {
-    if (!this.el.dialogue) return;
-    this.el['dialogue-who'].textContent = who;
-    this.el['dialogue-line'].textContent = line;
-    this.el.dialogue.classList.add('show');
-    clearTimeout(this.dialogueTimer);
-    this.dialogueTimer = setTimeout(() => {
-      this.el.dialogue.classList.remove('show');
-    }, ms);
-  }
-
-  showToast(text, ms = 2500) {
-    if (!this.el.toast) return;
-    this.el.toast.textContent = text;
-    this.el.toast.classList.add('show');
-    setTimeout(() => this.el.toast.classList.remove('show'), ms);
-  }
-
-  // Menus.
-  showMenu() {
-    if (this.el.menu) this.el.menu.classList.remove('hidden');
-    if (this.el.hud) this.el.hud.classList.add('hidden');
-  }
-
-  hideMenu() {
-    if (this.el.menu) this.el.menu.classList.add('hidden');
-    if (this.el.hud) this.el.hud.classList.remove('hidden');
-  }
-
-  showPause() {
-    this.paused = true;
-    if (this.el['pause-menu']) this.el['pause-menu'].classList.remove('hidden');
-  }
-
-  hidePause() {
-    this.paused = false;
-    if (this.el['pause-menu']) this.el['pause-menu'].classList.add('hidden');
-    if (this.onResume) this.onResume();
-  }
-
-  showResult(title, text, buttonText = 'Continue') {
-    if (!this.el.result) return;
-    this.el['result-title'].textContent = title;
-    this.el['result-text'].textContent = text;
-    this.el['result-btn'].textContent = buttonText;
-    this.el.result.classList.remove('hidden');
-  }
-
-  hideResult() {
-    if (this.el.result) this.el.result.classList.add('hidden');
-  }
-
-  // Garage: three upgrades, each a row with a buy button.
-  showGarage(money, upgrades) {
-    if (!this.el.garage) return;
-    this.setMoney(money);
-    const list = this.el['garage-list'];
+  hud.showToast = (text) => {
+    const t = el('toast');
+    t.textContent = text;
+    t.style.opacity = '1';
+    hud.toastTimer = 3;
+  };
+  hud.showDialogue = (who, text) => {
+    const box = el('dialogue');
+    el('dialogue-who').textContent = who;
+    el('dialogue-text').textContent = text;
+    box.style.opacity = '1';
+    hud.dialogueTimer = 6;
+  };
+  hud.showPrompt = (text) => {
+    const p = el('prompt');
+    p.textContent = text;
+    p.style.opacity = '1';
+    hud.promptTimer = 0.4;
+  };
+  hud.flashDamage = () => {
+    const d = el('damage');
+    d.style.opacity = '0.55';
+    setTimeout(() => { d.style.opacity = '0'; }, 180);
+  };
+  hud.showMissionComplete = (mission) => {
+    el('mc-title').textContent = `${mission.name} complete`;
+    el('mc-text').textContent = `Paid $${mission.payout.toLocaleString()}. The debt is $${(50000 - ctx.player.debtPaid).toLocaleString()} now.`;
+    el('mission-complete').style.display = 'flex';
+    setTimeout(() => { el('mission-complete').style.display = 'none'; }, 3500);
+  };
+  hud.showMissionFailed = (mission, reason) => {
+    el('mf-title').textContent = `${mission ? mission.name : 'Job'} failed`;
+    el('mf-text').textContent = reason;
+    el('mission-failed').style.display = 'flex';
+    setTimeout(() => { el('mission-failed').style.display = 'none'; }, 3500);
+  };
+  hud.showWin = () => {
+    el('win-screen').style.display = 'flex';
+  };
+  hud.showPause = (show) => {
+    el('pause-menu').style.display = show ? 'flex' : 'none';
+  };
+  hud.showMenu = (show) => {
+    el('start-menu').style.display = show ? 'flex' : 'none';
+  };
+  hud.showGarage = (show) => {
+    el('garage-menu').style.display = show ? 'flex' : 'none';
+    if (show) hud.renderGarage();
+  };
+  hud.renderGarage = () => {
+    const list = el('garage-list');
     list.innerHTML = '';
-    for (const [key, up] of Object.entries(CONFIG.upgrades)) {
-      const owned = !!upgrades[key];
+    for (const up of GARAGE_UPGRADES) {
+      const lvl = ctx.player.car ? ctx.player.car.upgrades[up.id] : ctx.player.upgrades[up.id];
       const row = document.createElement('div');
-      row.className = 'upgrade' + (owned ? ' owned' : '');
-      const name = document.createElement('span');
-      name.textContent = up.name + ' — ' + up.desc;
-      const btn = document.createElement('button');
-      btn.textContent = owned ? 'Installed' : '$' + up.cost;
-      btn.disabled = owned || money < up.cost;
-      btn.addEventListener('click', () => this.onGarageBuy(key));
-      row.appendChild(name);
-      row.appendChild(btn);
+      row.className = 'garage-row';
+      const maxed = lvl >= up.max;
+      row.innerHTML = `<span>${up.name} — ${up.desc} (lvl ${lvl}/${up.max})</span>` +
+        `<button ${maxed || ctx.player.money < up.cost ? 'disabled' : ''}>$${up.cost}</button>`;
+      row.querySelector('button').addEventListener('click', () => {
+        if (ctx.player.money < up.cost) return;
+        ctx.player.money -= up.cost;
+        if (ctx.player.car) ctx.player.car.upgrades[up.id] += 1;
+        ctx.player.upgrades[up.id] += 1;
+        ctx.audio.cash();
+        hud.renderGarage();
+        hud.showToast(`${up.name} upgraded to level ${lvl + 1}`);
+      });
       list.appendChild(row);
     }
-    this.el.garage.classList.remove('hidden');
-  }
+    el('garage-money').textContent = `$${ctx.player.money.toLocaleString()}`;
+  };
 
-  hideGarage() {
-    if (this.el.garage) this.el.garage.classList.add('hidden');
-  }
+  // Menu buttons.
+  el('start-btn').addEventListener('click', () => ctx.startGame(false));
+  el('continue-btn').addEventListener('click', () => ctx.startGame(true));
+  el('resume-btn').addEventListener('click', () => ctx.togglePause());
+  el('restart-btn').addEventListener('click', () => ctx.restartMission());
+  el('garage-close').addEventListener('click', () => hud.showGarage(false));
+  el('win-again').addEventListener('click', () => {
+    el('win-screen').style.display = 'none';
+    ctx.state = 'playing';
+  });
 
-  get garageOpen() {
-    return this.el.garage && !this.el.garage.classList.contains('hidden');
+  // Fill the controls list on the start menu from CONFIG.
+  const cl = el('controls-list');
+  for (const [key, desc] of CONTROLS) {
+    const row = document.createElement('div');
+    row.className = 'control-row';
+    row.innerHTML = `<b>${key}</b><span>${desc}</span>`;
+    cl.appendChild(row);
   }
+  return hud;
+}
 
-  // Minimap: top-down, roads, water, player arrow, mission marker,
-  // police blips, garage. World 800 maps to the 180 px canvas.
-  drawMinimap(player, heading, inCar, marker, police, garagePos) {
-    const ctx = this.mapCtx;
-    if (!ctx) return;
-    const S = 180;
-    const scale = S / 820;
-    const toMap = (x, z) => [(x + 410) * scale, (z + 410) * scale];
-    ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = '#2a2a30';
-    ctx.fillRect(0, 0, S, S);
-    // Water on the west edge.
-    ctx.fillStyle = '#2fb3a6';
-    ctx.fillRect(0, 0, 78 * scale, S);
-    // Roads.
-    ctx.strokeStyle = '#5a5a66';
-    ctx.lineWidth = 2;
-    for (let c = -240; c <= 240; c += 80) {
-      const [x1, y1] = toMap(c, -260);
-      const [x2, y2] = toMap(c, 260);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-      const [x3, y3] = toMap(-260, c);
-      const [x4, y4] = toMap(260, c);
-      ctx.beginPath();
-      ctx.moveTo(x3, y3);
-      ctx.lineTo(x4, y4);
-      ctx.stroke();
-    }
-    // Garage.
-    const [gx, gy] = toMap(garagePos.x, garagePos.z);
-    ctx.fillStyle = '#f2a541';
-    ctx.fillRect(gx - 4, gy - 4, 8, 8);
-    // Mission marker: a pulsing yellow diamond.
-    if (marker) {
-      const [mx, my] = toMap(marker.x, marker.z);
-      const pulse = 5 + Math.sin(Date.now() / 200) * 2;
-      ctx.fillStyle = '#ffd23e';
-      ctx.beginPath();
-      ctx.moveTo(mx, my - pulse);
-      ctx.lineTo(mx + pulse, my);
-      ctx.lineTo(mx, my + pulse);
-      ctx.lineTo(mx - pulse, my);
-      ctx.closePath();
-      ctx.fill();
-    }
-    // Police blips.
-    ctx.fillStyle = '#4d8dff';
-    for (const car of police) {
-      const [px, py] = toMap(car.x, car.z);
-      ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Player arrow.
-    const [px, py] = toMap(player.x, player.z);
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(heading);
-    ctx.fillStyle = inCar ? '#ff5a4e' : '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(0, -7);
-    ctx.lineTo(5, 5);
-    ctx.lineTo(-5, 5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+function stars(n) {
+  let s = '';
+  for (let i = 0; i < 5; i++) s += i < n ? '\u2605' : '\u2606';
+  return s;
+}
+
+export function updateHud(hud, ctx, dt) {
+  hud.toastTimer -= dt;
+  if (hud.toastTimer <= 0) el('toast').style.opacity = '0';
+  hud.dialogueTimer -= dt;
+  if (hud.dialogueTimer <= 0) el('dialogue').style.opacity = '0';
+  hud.promptTimer -= dt;
+  if (hud.promptTimer <= 0) el('prompt').style.opacity = '0';
+
+  const p = ctx.player;
+  el('money').textContent = `$${p.money.toLocaleString()}`;
+  el('debt-fill').style.width = `${Math.min(100, (p.debtPaid / CONFIG.player.debtTotal) * 100)}%`;
+  el('debt-text').textContent = `Debt $${p.debtPaid.toLocaleString()} / $${CONFIG.player.debtTotal.toLocaleString()}`;
+  el('health-fill').style.width = `${Math.max(0, p.health)}%`;
+  el('wanted').textContent = stars(ctx.police.wanted);
+  el('wanted').style.color = ctx.police.wanted > 0 ? '#ff4444' : '#ffd93d';
+  const speed = p.car ? Math.abs(p.car.speed) * 3.2 : 0;
+  el('speed').textContent = `${Math.round(speed)} km/h`;
+  el('vehicle').textContent = p.car ? (p.car.isPolice ? 'Police cruiser' : 'Carmen\u2019s coupe') : 'On foot';
+  el('radio').textContent = ctx.audio.stationName();
+  el('objective').textContent = ctx.missionsObjective();
+  drawMinimap(ctx);
+}
+
+// Top-down minimap: roads, lagoon, player, mission marker, police, traffic.
+export function drawMinimap(ctx) {
+  const canvas = el('minimap');
+  if (!canvas) return;
+  const g = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const w = ctx.world;
+  const toX = (x) => ((x - -220) / 460) * W;
+  const toY = (z) => ((z - -280) / 480) * H;
+
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = '#24351f';
+  g.fillRect(0, 0, W, H);
+  // Lagoon.
+  g.fillStyle = '#2fb3c9';
+  g.fillRect(toX(-200), toY(-260), toX(230) - toX(-200), toY(-60) - toY(-260));
+  // Roads.
+  g.strokeStyle = '#8a8a8a';
+  g.lineWidth = 2;
+  for (const [a, b] of w.edges) {
+    g.beginPath();
+    g.moveTo(toX(a.x), toY(a.z));
+    g.lineTo(toX(b.x), toY(b.z));
+    g.stroke();
   }
+  // Garage.
+  g.fillStyle = '#e8b04b';
+  g.fillRect(toX(14), toY(114), 12, 12);
+  // Mission marker.
+  const m = ctx.missions;
+  if (m.active && m.beacon.visible) {
+    const bx = toX(m.beacon.position.x);
+    const by = toY(m.beacon.position.z);
+    g.fillStyle = '#ffd93d';
+    g.beginPath();
+    g.arc(bx, by, 6, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#fff';
+    g.lineWidth = 2;
+    g.stroke();
+  }
+  // Traffic dots.
+  g.fillStyle = '#cfd8dc';
+  for (const c of ctx.traffic.cars) {
+    g.fillRect(toX(c.x) - 1.5, toY(c.z) - 1.5, 3, 3);
+  }
+  // Police blips.
+  g.fillStyle = '#ff2222';
+  for (const c of ctx.police.cars) {
+    g.beginPath();
+    g.arc(toX(c.x), toY(c.z), 3.5, 0, Math.PI * 2);
+    g.fill();
+  }
+  if (ctx.police.heli.visible) {
+    g.fillStyle = '#ff8888';
+    g.beginPath();
+    g.arc(toX(ctx.police.heli.position.x), toY(ctx.police.heli.position.z), 4, 0, Math.PI * 2);
+    g.fill();
+  }
+  // Player arrow.
+  const p = ctx.player;
+  const px = toX(p.car ? p.car.x : p.x);
+  const py = toY(p.car ? p.car.z : p.z);
+  const ang = p.car ? p.car.angle : p.angle;
+  g.save();
+  g.translate(px, py);
+  g.rotate(Math.atan2(Math.sin(ang), Math.cos(ang)) + Math.PI);
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  g.moveTo(0, -7);
+  g.lineTo(5, 6);
+  g.lineTo(-5, 6);
+  g.closePath();
+  g.fill();
+  g.restore();
 }

@@ -1,130 +1,82 @@
-// Traffic. One job: cars that drive the city like they live there —
-// pick a road, follow it, turn at intersections, slow for the car
-// ahead, stop when the player blocks the road.
+// Traffic: AI cars that follow the road graph, plus parked cars the player
+// can steal. Traffic slows for the car ahead and for the player.
 
-import * as THREE from 'three';
+import { makeCar, driveCar, randomBodyColor } from './cars.js';
 import { CONFIG } from './config.js';
-import { Car, carColorAt, carNameAt } from './cars.js';
 
-export class Traffic {
-  constructor(scene, layout, colliders, rng) {
-    this.scene = scene;
-    this.layout = layout;
-    this.colliders = colliders;
-    this.rng = rng;
-    this.cars = [];
-    this.spawn();
+export function createTraffic(world, scene, rng) {
+  const cars = [];
+  const used = new Set();
+
+  for (let i = 0; i < CONFIG.traffic.count; i++) {
+    const node = world.nodes[Math.floor(rng.next() * world.nodes.length)];
+    const key = `${node.id}`;
+    if (used.has(key)) continue;
+    used.add(key);
+    const nextId = node.links[Math.floor(rng.next() * node.links.length)];
+    const next = world.nodes[nextId];
+    const angle = Math.atan2(next.x - node.x, next.z - node.z);
+    const car = makeCar(world, scene, node.x, node.z, angle, randomBodyColor(rng), { traffic: true });
+    car.speed = CONFIG.traffic.speed * rng.range(0.8, 1.15);
+    car.node = node.id;
+    car.nextNode = nextId;
+    cars.push(car);
   }
 
-  spawn() {
-    for (let i = 0; i < CONFIG.trafficCars; i++) {
-      const node = this.layout.randomRoadPoint(this.rng);
-      const color = carColorAt(i + 3);
-      const car = new Car(this.scene, node.x, node.z, this.rng.range(0, Math.PI * 2), color, {
-        name: carNameAt(i + 3),
-      });
-      const next = node.links.length ? this.rng.pick(node.links) : node;
-      this.cars.push({
-        car,
-        node,
-        target: next,
-        speed: CONFIG.trafficSpeed * this.rng.range(0.8, 1.15),
-        wait: 0,
-      });
+  // Parked cars along downtown roads, doors unlocked, waiting to be borrowed.
+  const parked = [];
+  const parkSpots = [
+    [-100, -14], [-50, 26], [50, -14], [100, 66], [-50, 106], [0, 146],
+    [150, 26], [-100, 66], [50, 146],
+  ];
+  for (const [x, z] of parkSpots) {
+    const car = makeCar(world, scene, x, z, rng.range(0, Math.PI * 2), randomBodyColor(rng), { parked: true });
+    parked.push(car);
+  }
+  return { cars, parked };
+}
+
+function steerToward(car, tx, tz, dt) {
+  const want = Math.atan2(tx - car.x, tz - car.z);
+  let diff = want - car.angle;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  const steer = Math.max(-1, Math.min(1, diff * 2.2));
+  return steer;
+}
+
+export function updateTraffic(traffic, world, dt, playerCar, rng) {
+  for (const car of traffic.cars) {
+    if (car.wrecked) continue;
+    const target = world.nodes[car.nextNode];
+    if (!target) continue;
+    const dx = target.x - car.x;
+    const dz = target.z - car.z;
+    const dist = Math.hypot(dx, dz);
+
+    // Slow down if something is right in front of us.
+    let desired = CONFIG.traffic.speed;
+    if (playerCar && !playerCar.wrecked) {
+      const pd = Math.hypot(playerCar.x - car.x, playerCar.z - car.z);
+      if (pd < 10) desired = Math.min(desired, 4);
     }
-  }
-
-  // The nearest traffic car to a point, for stealing and collisions.
-  nearest(x, z, maxDist) {
-    let best = null;
-    let bestD = maxDist * maxDist;
-    for (const t of this.cars) {
-      const dx = t.car.x - x;
-      const dz = t.car.z - z;
-      const d = dx * dx + dz * dz;
-      if (d < bestD) {
-        bestD = d;
-        best = t;
-      }
+    for (const other of traffic.cars) {
+      if (other === car || other.wrecked) continue;
+      const od = Math.hypot(other.x - car.x, other.z - car.z);
+      if (od < 8) desired = Math.min(desired, 3);
     }
-    return best;
-  }
 
-  update(dt, playerPos) {
-    for (const t of this.cars) {
-      const c = t.car;
-      const dx = t.target.x - c.x;
-      const dz = t.target.z - c.z;
-      const dist = Math.hypot(dx, dz);
+    const steer = steerToward(car, target.x, target.z, dt);
+    const throttle = car.speed < desired ? 0.6 : 0;
+    driveCar(car, world, dt, throttle, steer, false);
+    car.speed = Math.max(0, Math.min(car.speed, desired + 2));
 
-      // Arrived at the target intersection: pick the next road.
-      if (dist < 3) {
-        t.node = t.target;
-        const onward = t.node.links.filter((n) => n !== t.node);
-        t.target = onward.length ? this.rng.pick(onward) : t.node;
-        continue;
-      }
-
-      // Slow down for the car ahead or the player.
-      let wantSpeed = t.speed;
-      const ahead = this.aheadOf(c, 14);
-      if (ahead) wantSpeed = Math.min(wantSpeed, ahead.speed * 0.9);
-      if (playerPos) {
-        const pd = Math.hypot(playerPos.x - c.x, playerPos.z - c.z);
-        if (pd < 7) wantSpeed = 0;
-      }
-      const targetHeading = Math.atan2(dx, dz);
-      let dh = targetHeading - c.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      c.heading += THREE.MathUtils.clamp(dh, -1.6 * dt, 1.6 * dt);
-      c.speed += (wantSpeed - c.speed) * Math.min(1, dt * 2);
-      c.x += Math.sin(c.heading) * c.speed * dt;
-      c.z += Math.cos(c.heading) * c.speed * dt;
-      c.mesh.position.set(c.x, 0, c.z);
-      c.mesh.rotation.y = c.heading;
-      for (const w of c.mesh.userData.wheels) w.rotation.x += c.speed * dt * 2.2;
+    if (dist < 4) {
+      const node = world.nodes[car.nextNode];
+      car.node = node.id;
+      const choices = node.links.filter((id) => id !== car.node || node.links.length === 1);
+      const pickFrom = choices.length ? choices : node.links;
+      car.nextNode = pickFrom[Math.floor(rng.next() * pickFrom.length)];
     }
-  }
-
-  aheadOf(car, dist) {
-    const fx = Math.sin(car.heading);
-    const fz = Math.cos(car.heading);
-    let best = null;
-    let bestD = dist;
-    for (const t of this.cars) {
-      if (t.car === car) continue;
-      const dx = t.car.x - car.x;
-      const dz = t.car.z - car.z;
-      const along = dx * fx + dz * fz;
-      const side = Math.abs(dx * fz - dz * fx);
-      if (along > 0 && along < bestD && side < 3) {
-        bestD = along;
-        best = t.car;
-      }
-    }
-    return best;
-  }
-
-  // Pull one traffic car out of the world (stolen by the player).
-  remove(entry) {
-    const i = this.cars.indexOf(entry);
-    if (i >= 0) {
-      this.cars.splice(i, 1);
-      return entry.car;
-    }
-    return null;
-  }
-
-  // Park a car back into traffic at a random road point.
-  addBack(car) {
-    const node = this.layout.randomRoadPoint(this.rng);
-    car.x = node.x;
-    car.z = node.z;
-    car.heading = this.rng.range(0, Math.PI * 2);
-    car.speed = 0;
-    car.mesh.position.set(car.x, 0, car.z);
-    const next = node.links.length ? this.rng.pick(node.links) : node;
-    this.cars.push({ car, node, target: next, speed: CONFIG.trafficSpeed, wait: 0 });
   }
 }
